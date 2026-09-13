@@ -3,7 +3,7 @@ import { useFetch } from '../../hooks/useFetch';
 import { getUsers, createUser, deleteUserApi } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { roleMeta } from '../../config/roles';
-import { wards } from '../../lib/geography';
+import { useWardOptions } from '../../hooks/useGeo';
 import { wardLabel } from '../../lib/geography';
 import PageHeader from '../../components/ui/PageHeader';
 import DataTable from '../../components/ui/DataTable';
@@ -21,6 +21,7 @@ export default function AdminUsers() {
   const [createOpen, setCreateOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'student', block: '', dept: '' });
+  const wardOptions = useWardOptions();
 
   const users = Array.isArray(data) ? data : [];
 
@@ -40,7 +41,7 @@ export default function AdminUsers() {
       setForm({ name: '', email: '', password: '', role: 'student', block: '', dept: '' });
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not create user.', 'error');
+      showToast(err?.message || 'Could not create user.', 'error');
     } finally {
       setSaving(false);
     }
@@ -53,7 +54,7 @@ export default function AdminUsers() {
       showToast('User deleted.', 'success');
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not delete user.', 'error');
+      showToast(err?.message || 'Could not delete user.', 'error');
     }
   };
 
@@ -129,7 +130,7 @@ export default function AdminUsers() {
               <label className="form-label">Ward (block)</label>
               <select className="form-select" value={form.block} onChange={set('block')}>
                 <option value="">Select ward…</option>
-                {wards().map((w) => <option key={w.code} value={w.code}>{w.name} ({w.zone})</option>)}
+                {wardOptions.map((w) => <option key={w.code} value={w.code}>{w.name} ({w.zone})</option>)}
               </select>
             </div>
           )}

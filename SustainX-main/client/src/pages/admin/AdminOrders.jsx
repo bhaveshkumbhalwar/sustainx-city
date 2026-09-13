@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
-import { getOrders, updateOrderStatus, assignOrderApi } from '../../services/api';
+import { getOrders, updateOrderStatus } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import PageHeader from '../../components/ui/PageHeader';
 import DataTable from '../../components/ui/DataTable';
@@ -28,7 +28,7 @@ export default function AdminOrders() {
       showToast(`${order.orderId} → ${STATUS_LABEL[status]}`, 'success');
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not update order.', 'error');
+      showToast(err?.message || 'Could not update order.', 'error');
     }
   };
 
@@ -43,7 +43,7 @@ export default function AdminOrders() {
       setDeliverTarget(null);
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Verification failed.', 'error');
+      showToast(err?.message || 'Verification failed.', 'error');
     } finally { setSaving(false); }
   };
 
@@ -61,11 +61,6 @@ export default function AdminOrders() {
       width: '200px',
       render: (row) => (
         <div className="u-flex">
-          {!row.assignedTo && row.status === 'pending' && (
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => assignOrderApi(row.orderId).then(() => { showToast('Order assigned to you.', 'success'); refetch(); }).catch((e) => showToast(e?.response?.data?.message || 'Assign failed.', 'error'))}>
-              Assign to me
-            </button>
-          )}
           {row.status === 'pending' && <button type="button" className="btn btn-ghost btn-sm" onClick={() => advance(row, 'approved')}>Approve</button>}
           {row.status === 'approved' && <button type="button" className="btn btn-ghost btn-sm" onClick={() => advance(row, 'ready_for_pickup')}>Ready</button>}
           {row.status === 'ready_for_pickup' && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDeliver(row)}><Icon name="check" size={15} /> Deliver</button>}

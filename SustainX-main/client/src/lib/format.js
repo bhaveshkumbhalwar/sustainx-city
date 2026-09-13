@@ -69,3 +69,18 @@ export function initials(name) {
     .slice(0, 2)
     .toUpperCase();
 }
+
+// Authoritative SLA display: formats the backend-provided slaRemainingMs.
+// Positive → time left; negative → breached. Never recomputed from policy.
+export function fmtSla(ms) {
+  if (ms === null || ms === undefined || Number.isNaN(Number(ms))) return { label: 'Not available', breached: false };
+  const n = Number(ms);
+  const abs = Math.abs(n);
+  const hours = Math.floor(abs / 3600000);
+  const mins = Math.floor((abs % 3600000) / 60000);
+  const span = hours >= 48
+    ? `${Math.floor(hours / 24)}d ${hours % 24}h`
+    : hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  if (n < 0) return { label: `Breached by ${span}`, breached: true };
+  return { label: `${span} left`, breached: false };
+}

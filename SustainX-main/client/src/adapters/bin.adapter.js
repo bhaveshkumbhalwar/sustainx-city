@@ -41,18 +41,30 @@ export function toBinsUi(list) {
   return (list || []).map(toBinUi);
 }
 
-// Cautious fill prediction. Clearly labeled as ESTIMATED, derived from the
-// most recent observed readings. Not a real ML model — kept in a mock module.
-export function predictFill(bin) {
-  const level = clampPct(bin?.level);
-  if (level < 40) return null;
-  const hoursTo80 = Math.max(1, Math.round((80 - level) / 4));
-  const risk = level >= 85 ? 'High' : level >= 70 ? 'Medium' : 'Low';
+// Merge SmartBin register records (coordinates, identity) with the latest
+// IoT readings (observed fill levels). Reading wins for level; register
+// wins for identity/coords. Pure real-data join — no invented values.
+export function mergeBinLevels(bins, readings) {
+  const byId = new Map((readings || []).map((r) => [String(r?.binId).toUpperCase(), r]));
+  return (bins || []).map((bin) => {
+    const reading = byId.get(String(bin?.binId).toUpperCase());
+    return {
+      ...bin,
+      level: reading?.level ?? bin?.currentLevel ?? 0,
+      lastUpdated: reading?.lastUpdated || bin?.lastReadingAt || bin?.updatedAt,
+      alert: bin?.alert ?? false,
+    };
+  });
+}
+
+// Fill estimates come ONLY from GET /api/ai/bins/:binId/fill-estimate.
+// They are always labeled "Estimated" in the UI — never as sensor readings.
+export function toEstimateUi(raw) {
+  if (!raw) return null;
   return {
-    level,
-    estimatedLevel: Math.min(100, level + 10),
-    estimatedIn: level >= 80 ? 0 : hoursTo80,
-    risk,
-    source: 'demo',
+    binId: raw.binId,
+    currentLevel: clampPct(raw.currentLevel),
+    estimatedHoursToFull: raw.estimatedHoursToFullBoard ?? null,
+    mode: raw.mode || 'demo-rule-based',
   };
 }

@@ -1,6 +1,9 @@
 import Badge from './Badge';
 
 export default function PriorityBadge({ level = 'normal', label }) {
+  if (level === null || level === undefined || level === '') {
+    return <Badge tone="neutral">Not available</Badge>;
+  }
   const map = {
     low: ['neutral', 'Low'],
     normal: ['info', 'Normal'],

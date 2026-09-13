@@ -35,7 +35,7 @@ export default function AdminRewards() {
       setForm({ user: '', activity: '', points: '' });
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not award points.', 'error');
+      showToast(err?.message || 'Could not award points.', 'error');
     } finally {
       setSaving(false);
     }

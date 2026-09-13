@@ -28,15 +28,14 @@ export function statusLabel(status) {
   return m ? m.label : status || '—';
 }
 
-// Priority is DERIVED from real data only. No invented AI.
-// - IoT alerts / near-full smart bins -> elevated priority
-// - Fresh + unresolved -> normal
-export function derivePriority(c) {
-  if (c && c.type === 'iot') return 'high';
-  if (c && c.binId) return 'high';
-  const ageHours = c && c.createdAt ? (Date.now() - new Date(c.createdAt).getTime()) / 3600000 : 0;
-  if (statusOpen(c) && ageHours > 48) return 'high';
-  return 'normal';
+// Priority comes from the backend (low/medium/high/critical — SLA engine).
+// Never recomputed on the client. Unknown values fall back to 'medium',
+// null stays null so the UI can render "Not available".
+const PRIORITY_LEVELS = ['low', 'medium', 'high', 'critical'];
+export function normalizePriority(p) {
+  if (p === null || p === undefined || p === '') return null;
+  const v = String(p).toLowerCase();
+  return PRIORITY_LEVELS.includes(v) ? v : 'medium';
 }
 
 export function statusOpen(c) {
@@ -50,7 +49,7 @@ export function toComplaintUi(raw) {
     ...raw,
     id: raw?.complaintId,
     status,
-    priority: derivePriority(raw),
+    priority: normalizePriority(raw?.priority),
     ward: wardLabel(raw?.block),
     zone: zoneOf(raw?.block),
     block: raw?.block || null,

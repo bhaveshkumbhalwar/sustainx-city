@@ -1,10 +1,11 @@
 import { useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
-import { getIotBinData } from '../../services/api';
-import { toBinsUi } from '../../adapters/bin.adapter';
+import { useGeoIndex } from '../../hooks/useGeo';
+import { getBins, getIotBinData } from '../../services/api';
+import { toBinsUi, mergeBinLevels } from '../../adapters/bin.adapter';
+import { coordForBin } from '../../services/geo';
 import { wardLabel } from '../../lib/geography';
-import { demoCoordForWard } from '../../mock/demoGeo';
 import PageHeader from '../../components/ui/PageHeader';
 import StatCard from '../../components/ui/StatCard';
 import SectionCard from '../../components/ui/SectionCard';
@@ -16,17 +17,38 @@ import MapContainer from '../../components/maps/MapContainer';
 export default function CollectorBins() {
   const { user } = useAuth();
   const ward = wardLabel(user?.block);
-  const { data, loading } = useFetch(getIotBinData);
-  const bins = useMemo(() => toBinsUi(data), [data]);
+  const { data: register, loading: regLoading } = useFetch(getBins);
+  const { data: readings, loading: readLoading } = useFetch(getIotBinData);
+  const geo = useGeoIndex();
+
+  const loading = regLoading || readLoading;
+  const bins = useMemo(() => toBinsUi(mergeBinLevels(register, readings)), [register, readings]);
   const blockBins = bins.filter((b) => String(b.block).toUpperCase() === String(user?.block).toUpperCase());
   const total = blockBins.length;
   const high = blockBins.filter((b) => b.level >= 70).length;
   const overflow = blockBins.filter((b) => b.level >= 85).length;
 
-  const markers = blockBins.map((b) => {
-    const geo = demoCoordForWard(b.block);
-    return { id: b.id, lat: geo?.lat, lng: geo?.lng, tone: b.state.tone, popup: { title: `Bin ${b.binId}`, desc: `${b.state.label} · ${b.level}%` } };
-  });
+  const markers = useMemo(
+    () =>
+      blockBins
+        .map((b) => {
+          const coord = coordForBin(b, geo);
+          if (!coord) return null;
+          return {
+            id: b.id,
+            lat: coord.lat,
+            lng: coord.lng,
+            tone: b.state.tone,
+            popup: {
+              title: `Bin ${b.binId}`,
+              desc: `${b.state.label} · ${b.level}%${coord.real ? '' : ' · ward area (approx.)'}`,
+            },
+          };
+        })
+        .filter(Boolean),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bins, geo, user?.block],
+  );
 
   return (
     <>
@@ -38,7 +60,7 @@ export default function CollectorBins() {
         <StatCard icon="alert-triangle" label="Overflow risk" value={overflow} loading={loading} tone={overflow ? 'danger' : 'neutral'} />
       </div>
 
-      <MapContainer markers={markers} title={`${ward} bins`} height={340} />
+      <MapContainer markers={markers} title={`${ward} bins`} height={340} demoNote={null} />
 
       <SectionCard title="All bins" className="u-mt-1">
         {loading ? (

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
-import { getOrders, updateOrderStatus } from '../../services/api';
+import { getOrders, updateOrderStatus, assignOrderApi } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import PageHeader from '../../components/ui/PageHeader';
 import DataTable from '../../components/ui/DataTable';
@@ -31,13 +31,23 @@ export default function CollectorOrders() {
       showToast(`${order.orderId} → ${STATUS_LABEL[next]}`, 'success');
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not update order.', 'error');
+      showToast(err?.message || 'Could not update order.', 'error');
     }
   };
 
   const openDeliver = (order) => {
     setDeliverTarget(order);
     setCode('');
+  };
+
+  const takeOrder = async (order) => {
+    try {
+      await assignOrderApi(order._id);
+      showToast(`${order.orderId} assigned to you.`, 'success');
+      refetch();
+    } catch (err) {
+      showToast(err?.message || 'Could not take order.', 'error');
+    }
   };
 
   const confirmDeliver = async () => {
@@ -49,7 +59,7 @@ export default function CollectorOrders() {
       setDeliverTarget(null);
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Verification failed.', 'error');
+      showToast(err?.message || 'Verification failed.', 'error');
     } finally {
       setSaving(false);
     }
@@ -67,6 +77,11 @@ export default function CollectorOrders() {
       width: '160px',
       render: (row) => (
         <div className="u-flex">
+          {!row.assignedTo && row.status === 'pending' && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => takeOrder(row)}>
+              Take
+            </button>
+          )}
           {nextStatus[row.status] && (
             <button type="button" className="btn btn-primary btn-sm" onClick={() => advance(row)}>
               {STATUS_LABEL[nextStatus[row.status]] || 'Next'}

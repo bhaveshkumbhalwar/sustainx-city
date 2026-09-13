@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import { useFetch } from '../../hooks/useFetch';
-import { getIotBinData } from '../../services/api';
-import { toBinsUi } from '../../adapters/bin.adapter';
-import { demoCoordForWard } from '../../mock/demoGeo';
+import { useGeoIndex } from '../../hooks/useGeo';
+import { getBins, getIotBinData } from '../../services/api';
+import { toBinsUi, mergeBinLevels } from '../../adapters/bin.adapter';
+import { coordForBin } from '../../services/geo';
 import PageHeader from '../../components/ui/PageHeader';
 import StatCard from '../../components/ui/StatCard';
 import SectionCard from '../../components/ui/SectionCard';
@@ -13,17 +14,37 @@ import DataTable from '../../components/ui/DataTable';
 import MapContainer from '../../components/maps/MapContainer';
 
 export default function AdminBins() {
-  const { data, loading } = useFetch(getIotBinData);
-  const bins = useMemo(() => toBinsUi(data), [data]);
+  const { data: register, loading: regLoading } = useFetch(getBins);
+  const { data: readings, loading: readLoading } = useFetch(getIotBinData);
+  const geo = useGeoIndex();
+
+  const loading = regLoading || readLoading;
+  const bins = useMemo(() => toBinsUi(mergeBinLevels(register, readings)), [register, readings]);
 
   const total = bins.length;
   const high = bins.filter((b) => b.level >= 70).length;
   const overflow = bins.filter((b) => b.level >= 85).length;
 
-  const markers = bins.map((b) => {
-    const g = demoCoordForWard(b.block);
-    return { id: b.id, lat: g?.lat, lng: g?.lng, tone: b.state.tone, popup: { title: `Bin ${b.binId}`, desc: `${b.state.label} · ${b.level}%` } };
-  });
+  const markers = useMemo(
+    () =>
+      bins
+        .map((b) => {
+          const coord = coordForBin(b, geo);
+          if (!coord) return null;
+          return {
+            id: b.id,
+            lat: coord.lat,
+            lng: coord.lng,
+            tone: b.state.tone,
+            popup: {
+              title: `Bin ${b.binId}`,
+              desc: `${b.state.label} · ${b.level}%${coord.real ? '' : ' · ward area (approx.)'}`,
+            },
+          };
+        })
+        .filter(Boolean),
+    [bins, geo],
+  );
 
   const columns = [
     { key: 'binId', label: 'Bin ID', sortable: true, render: (_, v) => <span className="u-mono">{v}</span> },
@@ -49,11 +70,11 @@ export default function AdminBins() {
         <StatCard icon="alert-triangle" label="Overflow risk" value={overflow} loading={loading} tone={overflow ? 'danger' : 'neutral'} />
       </div>
 
-      <MapContainer markers={markers} title="All bins map" height={380} />
+      <MapContainer markers={markers} title="All bins map" height={380} demoNote={null} />
 
       <SectionCard title="Bin register" className="u-mt-1">
         {bins.length === 0 && !loading ? (
-          <EmptyState icon="trash" title="No bin readings" description="Data will appear here as IoT devices report." />
+          <EmptyState icon="trash" title="No bin readings" description="Register bins and connect IoT devices for data to appear here." />
         ) : (
           <DataTable columns={columns} data={bins} keyField="id" loading={loading} emptyTitle="No bins" emptyDescription="No readings yet." />
         )}

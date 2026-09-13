@@ -1,8 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useFetch } from '../../hooks/useFetch';
-import { getDashboardStats, getComplaints } from '../../services/api';
+import { getDashboardStats, getComplaints, getAiInsights } from '../../services/api';
 import { toComplaintsUi } from '../../adapters/complaint.adapter';
-import { MOCK_AI_RECOMMENDATIONS } from '../../mock/operations.mock';
 import PageHeader from '../../components/ui/PageHeader';
 import StatCard from '../../components/ui/StatCard';
 import SectionCard from '../../components/ui/SectionCard';
@@ -15,6 +14,8 @@ import { formatNumber } from '../../lib/format';
 export default function ControlRoom() {
   const { data: stats, loading } = useFetch(getDashboardStats);
   const { data: rawComplaints, loading: cl } = useFetch(getComplaints);
+  const { data: rawInsights } = useFetch(() => getAiInsights({ limit: 4 }));
+  const insights = Array.isArray(rawInsights) ? rawInsights.slice(0, 4) : [];
 
   const s = stats || {};
   const oa = s.orderAnalytics || {};
@@ -95,19 +96,26 @@ export default function ControlRoom() {
 
         <SectionCard
           title="AI Insights"
-          subtitle={<><Badge tone="warning">Demo</Badge> Recommendations are illustrative</>}
+          subtitle="Latest rule-based operational insights"
+          actions={<Link to="/admin/ai" className="btn btn-ghost btn-sm">Open AI <Icon name="chevronRight" size={14} /></Link>}
         >
-          <div className="ai-cards">
-            {MOCK_AI_RECOMMENDATIONS.map((r) => (
-              <div key={r.id} className="ai-card">
-                <Icon name={r.type === 'prediction' ? 'cpu' : r.type === 'trend' ? 'chart' : 'activity'} size={18} />
-                <div className="ai-card-body">
-                  <div className="ai-card-text">{r.title}</div>
-                  <Badge tone={r.severity === 'warning' ? 'warning' : 'info'}>{r.type}</Badge>
+          {insights.length === 0 ? (
+            <p style={{ padding: '1rem', color: 'var(--txt-muted)' }}>
+              No insights generated yet. Run the insights engine from the AI page.
+            </p>
+          ) : (
+            <div className="ai-cards">
+              {insights.map((r) => (
+                <div key={r._id || r.key} className="ai-card">
+                  <Icon name="cpu" size={18} />
+                  <div className="ai-card-body">
+                    <div className="ai-card-text">{r.title}</div>
+                    <Badge tone="info">{r.mode || 'demo-rule-based'}</Badge>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </SectionCard>
       </div>
     </>

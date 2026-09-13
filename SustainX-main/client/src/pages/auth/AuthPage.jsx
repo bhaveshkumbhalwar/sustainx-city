@@ -56,7 +56,7 @@ export default function AuthPage() {
     try {
       await login(loginEmail.trim().toLowerCase(), loginPass, selectedRole);
     } catch (err) {
-      setError(err.response?.data?.message || 'Sign in failed. Check your credentials.');
+      setError(err?.message || 'Sign in failed. Check your credentials.');
     } finally {
       setLoading(false);
     }
@@ -86,7 +86,7 @@ export default function AuthPage() {
       await register({ name: suName, email: suEmail, password: suPass });
       showToast('Welcome! 100 points sign-up bonus credited.', 'success', 5000);
     } catch (err) {
-      setError(err.response?.data?.message || 'Registration failed.');
+      setError(err?.message || 'Registration failed.');
     } finally {
       setLoading(false);
     }
@@ -105,7 +105,7 @@ export default function AuthPage() {
       const res = await forgotPasswordApi({ email: forgotEmail });
       setForgotSuccess(res.data.message);
     } catch (err) {
-      setForgotError(err.response?.data?.message || 'Request failed. Please verify your details.');
+      setForgotError(err?.message || 'Request failed. Please verify your details.');
     } finally {
       setForgotLoading(false);
     }

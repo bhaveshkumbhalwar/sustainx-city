@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useFetch } from '../../hooks/useFetch';
-import { getStoreItems, redeemStoreItem } from '../../services/api';
+import { getStoreItems, redeemStoreItem, getRewards } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import PageHeader from '../../components/ui/PageHeader';
 import SectionCard from '../../components/ui/SectionCard';
 import StatCard from '../../components/ui/StatCard';
 import Modal from '../../components/ui/Modal';
 import EmptyState from '../../components/ui/EmptyState';
+import Badge from '../../components/ui/Badge';
+import { fmtDateTime } from '../../lib/format';
 
 const EARN_STEPS = [
   'Report a waste issue',
@@ -20,10 +22,12 @@ export default function RewardsStore() {
   const { user, refreshUser } = useAuth();
   const { showToast } = useToast();
   const { data: items, loading, error, refetch } = useFetch(getStoreItems);
+  const { data: history } = useFetch(getRewards);
   const [selected, setSelected] = useState(null);
   const [redeeming, setRedeeming] = useState(false);
 
   const points = user?.rewardPoints ?? 0;
+  const ledger = Array.isArray(history) ? [...history].slice(0, 8) : [];
 
   const handleRedeem = async (item) => {
     if (!item || points < item.pointsRequired) return;
@@ -35,7 +39,7 @@ export default function RewardsStore() {
       refreshUser();
       refetch();
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not complete redemption.', 'error');
+      showToast(err?.message || 'Could not complete redemption.', 'error');
     } finally {
       setRedeeming(false);
     }
@@ -99,6 +103,24 @@ export default function RewardsStore() {
               );
             })}
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard title="Recent rewards" subtitle="Latest points credited to your account" className="u-mt-1">
+        {ledger.length === 0 ? (
+          <EmptyState icon="award" title="No rewards yet" description="Points you earn will appear here." />
+        ) : (
+          <ul className="complaint-mini-list">
+            {ledger.map((r) => (
+              <li key={r._id} className="complaint-mini-item">
+                <div className="complaint-mini-main">
+                  <div className="complaint-mini-title">{r.activity || 'Reward'}</div>
+                  <div className="complaint-mini-meta">{fmtDateTime(r.date || r.createdAt)}</div>
+                </div>
+                <Badge tone="success">+{r.points}</Badge>
+              </li>
+            ))}
+          </ul>
         )}
       </SectionCard>
 

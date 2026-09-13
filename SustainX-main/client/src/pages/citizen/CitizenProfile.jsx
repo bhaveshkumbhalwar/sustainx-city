@@ -31,7 +31,7 @@ export default function CitizenProfile() {
       await refreshUser();
       showToast('Profile updated.', 'success');
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not update profile.', 'error');
+      showToast(err?.message || 'Could not update profile.', 'error');
     } finally {
       setSavingProfile(false);
     }
@@ -57,7 +57,7 @@ export default function CitizenProfile() {
       showToast('Password changed.', 'success');
       setPw({ oldPassword: '', newPassword: '', confirm: '' });
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not change password.', 'error');
+      showToast(err?.message || 'Could not change password.', 'error');
     } finally {
       setSavingPw(false);
     }

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { loginUser, registerUser, getMe } from '../services/api';
+import { loginUser, registerUser, getMe, setToken, getToken } from '../services/api';
 
 /* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
 
@@ -14,12 +14,12 @@ export function AuthProvider({ children }) {
 
   // Check for existing token on mount
   useEffect(() => {
-    const token = localStorage.getItem('wms_token');
+    const token = getToken();
     if (token) {
       getMe()
         .then((res) => setUser(res.data.user))
         .catch(() => {
-          localStorage.removeItem('wms_token');
+          setToken(null);
           setUser(null);
         })
         .finally(() => setLoading(false));
@@ -30,25 +30,23 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (email, password, role) => {
     const res = await loginUser({ email, password, role });
-    localStorage.setItem('wms_token', res.data.token);
+    setToken(res.data.token);
     setUser(res.data.user);
     // Increment session key to force all dashboard components to remount with fresh state
     setSessionKey((k) => k + 1);
-    console.log(`🔑 [AUTH] Logged in as ${res.data.user.email} | role: ${res.data.user.role} | block: ${res.data.user.block || 'N/A'}`);
     return res.data.user;
   }, []);
 
   const register = useCallback(async (data) => {
     const res = await registerUser(data);
-    localStorage.setItem('wms_token', res.data.token);
+    setToken(res.data.token);
     setUser(res.data.user);
     setSessionKey((k) => k + 1);
     return res.data.user;
   }, []);
 
   const logout = useCallback(() => {
-    console.log('🔓 [AUTH] Logging out — clearing all state');
-    localStorage.removeItem('wms_token');
+    setToken(null);
     setUser(null);
     // Increment session key so next login gets completely fresh components
     setSessionKey((k) => k + 1);
@@ -63,8 +61,10 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const isAuthenticated = !!user;
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, sessionKey }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshUser, sessionKey, isAuthenticated }}>
       {children}
     </AuthContext.Provider>
   );

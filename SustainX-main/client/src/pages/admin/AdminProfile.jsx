@@ -22,7 +22,7 @@ export default function AdminProfile() {
     if (!profile.name.trim()) { showToast('Name cannot be empty.', 'warning'); return; }
     setSavingProfile(true);
     try { await updateUser(user._id, { name: profile.name.trim() }); await refreshUser(); showToast('Profile updated.', 'success'); }
-    catch (err) { showToast(err?.response?.data?.message || 'Could not update profile.', 'error'); }
+    catch (err) { showToast(err?.message || 'Could not update profile.', 'error'); }
     finally { setSavingProfile(false); }
   };
 
@@ -33,7 +33,7 @@ export default function AdminProfile() {
     if (pw.newPassword !== pw.confirm) { showToast('Passwords do not match.', 'warning'); return; }
     setSavingPw(true);
     try { await changePassword(user._id, { oldPassword: pw.oldPassword, newPassword: pw.newPassword }); showToast('Password changed.', 'success'); setPw({ oldPassword: '', newPassword: '', confirm: '' }); }
-    catch (err) { showToast(err?.response?.data?.message || 'Could not change password.', 'error'); }
+    catch (err) { showToast(err?.message || 'Could not change password.', 'error'); }
     finally { setSavingPw(false); }
   };
 

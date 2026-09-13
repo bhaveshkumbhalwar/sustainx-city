@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { submitComplaint } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { wards } from '../../lib/geography';
+import { useWardOptions } from '../../hooks/useGeo';
 import PageHeader from '../../components/ui/PageHeader';
 import SectionCard from '../../components/ui/SectionCard';
 import Icon from '../../components/ui/Icon';
@@ -11,10 +11,13 @@ const WASTE_TYPES = ['Mixed Waste', 'Plastic', 'Food', 'E-Waste', 'Hazardous', '
 
 const STEPS = ['Describe', 'Location', 'Submit'];
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
 export default function ReportWaste() {
   const { showToast } = useToast();
   const navigate = useNavigate();
   const fileRef = useRef(null);
+  const wardOptions = useWardOptions();
 
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
@@ -25,15 +28,56 @@ export default function ReportWaste() {
     block: '',
     imageFile: null,
     imagePreview: null,
+    lat: null,
+    lng: null,
   });
+  const [geoState, setGeoState] = useState('idle'); // idle | locating | ok | denied | unavailable | timeout
 
   const set = (key, value) => setForm((f) => ({ ...f, [key]: value }));
 
   const canNext = () => (step === 0 ? form.wasteType && form.description.trim() : form.location.trim() && !!form.block);
 
+  const useMyLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setGeoState('unavailable');
+      showToast('Geolocation is not available on this device. Enter the location manually.', 'warning');
+      return;
+    }
+    setGeoState('locating');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setForm((f) => ({ ...f, lat: pos.coords.latitude, lng: pos.coords.longitude }));
+        setGeoState('ok');
+        showToast('Location captured from GPS.', 'success');
+      },
+      (err) => {
+        const state = err?.code === 1 ? 'denied' : err?.code === 3 ? 'timeout' : 'unavailable';
+        setGeoState(state);
+        showToast(
+          state === 'denied'
+            ? 'Location permission denied. Enter the location manually.'
+            : 'Could not get your location. Enter it manually.',
+          'warning',
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
+    );
+  };
+
   const handleFile = (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
+    // Frontend pre-validation (backend remains the authority: 400/413).
+    if (!file.type.startsWith('image/')) {
+      showToast('Only image files (JPG, PNG, GIF, WebP) are allowed.', 'error');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      showToast('Image must be smaller than 5MB.', 'error');
+      e.target.value = '';
+      return;
+    }
     set('imageFile', file);
     const reader = new FileReader();
     reader.onload = () => set('imagePreview', reader.result);
@@ -50,12 +94,16 @@ export default function ReportWaste() {
       fd.append('wasteType', form.wasteType);
       fd.append('description', form.description.trim());
       fd.append('type', 'complaint');
+      if (form.lat !== null && form.lng !== null) {
+        fd.append('lat', String(form.lat));
+        fd.append('lng', String(form.lng));
+      }
       if (form.imageFile) fd.append('image', form.imageFile);
       await submitComplaint(fd);
       showToast('Report submitted. Thanks for keeping the city clean!', 'success');
       navigate('/citizen/complaints');
     } catch (err) {
-      showToast(err?.response?.data?.message || 'Could not submit the report.', 'error');
+      showToast(err?.message || 'Could not submit the report.', 'error');
       setSubmitting(false);
     }
   };
@@ -137,7 +185,7 @@ export default function ReportWaste() {
               <label className="form-label">Ward</label>
               <select className="form-select" value={form.block} onChange={(e) => set('block', e.target.value)}>
                 <option value="">Select ward…</option>
-                {wards().map((w) => (
+                {wardOptions.map((w) => (
                   <option key={w.code} value={w.code}>
                     {w.name} ({w.zone})
                   </option>
@@ -154,6 +202,27 @@ export default function ReportWaste() {
                 onChange={(e) => set('location', e.target.value)}
               />
             </div>
+            <div className="form-group">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={useMyLocation}
+                disabled={geoState === 'locating'}
+              >
+                <Icon name="map-pin" size={15} />
+                {geoState === 'locating' ? 'Locating…' : 'Use my GPS location'}
+              </button>
+              {geoState === 'ok' && form.lat !== null && (
+                <p className="u-text-muted u-text-sm u-mt-1">
+                  GPS captured: {form.lat.toFixed(5)}, {form.lng.toFixed(5)}
+                </p>
+              )}
+              {(geoState === 'denied' || geoState === 'timeout' || geoState === 'unavailable') && (
+                <p className="u-text-muted u-text-sm u-mt-1">
+                  GPS unavailable — the typed address above will be used instead.
+                </p>
+              )}
+            </div>
             <p className="u-text-muted u-text-sm">
               Precise street/pin descriptions help the crew find the spot faster.
             </p>
@@ -169,7 +238,7 @@ export default function ReportWaste() {
             <div className="report-review-row">
               <span className="report-review-label">Ward</span>
               <span className="report-review-value">
-                {form.block ? wards().find((w) => w.code === form.block)?.name : '—'}
+                {form.block ? wardOptions.find((w) => w.code === form.block)?.name : '—'}
               </span>
             </div>
             <div className="report-review-row">
@@ -182,7 +251,15 @@ export default function ReportWaste() {
             </div>
             <div className="report-review-row">
               <span className="report-review-label">Photo</span>
-              <span className="report-review-value">{form.imageFile ? 'Attached' : 'None'}</span>
+              <span className="report-review-value">
+                {form.imageFile ? `${form.imageFile.name} (${(form.imageFile.size / 1024).toFixed(0)} KB)` : 'None'}
+              </span>
+            </div>
+            <div className="report-review-row">
+              <span className="report-review-label">GPS</span>
+              <span className="report-review-value">
+                {form.lat !== null ? `${form.lat.toFixed(5)}, ${form.lng.toFixed(5)}` : 'Not captured'}
+              </span>
             </div>
           </div>
         )}

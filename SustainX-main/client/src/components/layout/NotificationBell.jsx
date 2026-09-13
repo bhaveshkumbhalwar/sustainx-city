@@ -1,34 +1,43 @@
-import { useState, useEffect, useRef } from 'react';
-import { getNotifications, markNotificationRead, markAllNotificationsRead } from '../../services/api';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { getNotifications, getUnreadCount, markNotificationRead, markAllNotificationsRead } from '../../services/api';
 import NotificationItem from './NotificationItem';
 
 /* eslint-disable react-hooks/set-state-in-effect */
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState([]);
+  const [unread, setUnread] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const unreadCount = unread;
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       const res = await getNotifications();
-      // Only update if data changed to avoid unnecessary renders
       setNotifications(res.data);
       return res.data;
-    } catch (err) {
-      console.error('Error fetching notifications:', err);
+    } catch {
       return [];
     }
-  };
+  }, []);
+
+  const fetchUnread = useCallback(async () => {
+    try {
+      const res = await getUnreadCount();
+      if (typeof res.data?.unread === 'number') setUnread(res.data.unread);
+    } catch {
+      // silent — bell keeps last known count
+    }
+  }, []);
 
   useEffect(() => {
-    fetchNotifications();
-    // Poll every 5 seconds for immediate updates
-    const interval = setInterval(fetchNotifications, 5000);
+    fetchUnread();
+    // Controlled polling of the lightweight unread-count endpoint only.
+    // The full list is fetched on open; never poll the full list.
+    const interval = setInterval(fetchUnread, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchUnread]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -48,6 +57,7 @@ export default function NotificationBell() {
       // Refresh list and get fresh data
       const freshNotifications = await fetchNotifications();
       const freshUnreadCount = freshNotifications.filter(n => !n.isRead).length;
+      setUnread(freshUnreadCount);
       
       // If there are unread, mark all as read
       if (freshUnreadCount > 0) {
@@ -55,8 +65,9 @@ export default function NotificationBell() {
           await markAllNotificationsRead();
           // Optimistically update local state
           setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-        } catch (err) {
-          console.error('Error marking all as read:', err);
+          setUnread(0);
+        } catch {
+          // keep server state on failure
         }
       }
     }
@@ -69,8 +80,9 @@ export default function NotificationBell() {
       setNotifications(prev => 
         prev.map(n => n._id === notification._id ? { ...n, isRead: true } : n)
       );
-    } catch (err) {
-      console.error('Error marking as read:', err);
+      setUnread((u) => Math.max(0, u - 1));
+    } catch {
+      // keep server state on failure
     }
   };
 

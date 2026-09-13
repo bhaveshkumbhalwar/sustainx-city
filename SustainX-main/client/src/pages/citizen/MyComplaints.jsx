@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
-import { getComplaints } from '../../services/api';
-import { toComplaintsUi, sourceLabel } from '../../adapters/complaint.adapter';
+import { getComplaints, confirmComplaintApi, reopenComplaintApi } from '../../services/api';
+import { useToast } from '../../context/ToastContext';
+import { toComplaintsUi, sourceLabel, statusLabel } from '../../adapters/complaint.adapter';
 import PageHeader from '../../components/ui/PageHeader';
 import DataTable from '../../components/ui/DataTable';
 import SectionCard from '../../components/ui/SectionCard';
@@ -10,7 +11,7 @@ import Badge from '../../components/ui/Badge';
 import PriorityBadge from '../../components/ui/PriorityBadge';
 import Modal from '../../components/ui/Modal';
 import Icon from '../../components/ui/Icon';
-import { fmtDateTime } from '../../lib/format';
+import { fmtDateTime, fmtSla } from '../../lib/format';
 
 const STATUS_FILTERS = [
   { value: 'all', label: 'All' },
@@ -21,13 +22,43 @@ const STATUS_FILTERS = [
 ];
 
 export default function MyComplaints() {
+  const { showToast } = useToast();
   const { data, loading, error, refetch } = useFetch(getComplaints);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState(null);
+  const [acting, setActing] = useState(false);
 
   const list = toComplaintsUi(data);
   const filtered = statusFilter === 'all' ? list : list.filter((c) => c.status === statusFilter);
+
+  const doConfirm = async (c) => {
+    setActing(true);
+    try {
+      await confirmComplaintApi(c.id);
+      showToast('Resolution confirmed. Thank you!', 'success');
+      setSelected(null);
+      refetch();
+    } catch (err) {
+      showToast(err?.message || 'Could not confirm resolution.', 'error');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const doReopen = async (c) => {
+    setActing(true);
+    try {
+      await reopenComplaintApi(c.id);
+      showToast('Complaint reopened.', 'success');
+      setSelected(null);
+      refetch();
+    } catch (err) {
+      showToast(err?.message || 'Could not reopen complaint.', 'error');
+    } finally {
+      setActing(false);
+    }
+  };
 
   const columns = [
     { key: 'id', label: 'ID', sortable: true, render: (_, v) => <span className="u-mono">{v}</span> },
@@ -148,6 +179,41 @@ export default function MyComplaints() {
                 <span className="detail-value">{selected.assignedTo.name || '—'}</span>
               </div>
             )}
+            <div className="detail-row">
+              <span className="detail-label">SLA</span>
+              <span className="detail-value">
+                {(() => {
+                  const sla = fmtSla(selected.slaRemainingMs);
+                  return <Badge tone={sla.breached ? 'danger' : 'info'}>{sla.label}</Badge>;
+                })()}
+              </span>
+            </div>
+            {Array.isArray(selected.statusHistory) && selected.statusHistory.length > 0 && (
+              <div className="detail-desc">
+                <span className="detail-label">Timeline</span>
+                <ul className="timeline">
+                  {selected.statusHistory.map((h, i) => (
+                    <li key={i} className="timeline-item">
+                      <StatusBadge status={h.status} />
+                      <span className="u-text-sm">{h.note || statusLabel(h.status)}</span>
+                      <span className="u-text-muted u-text-sm">{fmtDateTime(h.timestamp)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            <div className="report-actions u-mt-1">
+              {selected.status === 'completed' && (
+                <button type="button" className="btn btn-primary btn-sm" disabled={acting} onClick={() => doConfirm(selected)}>
+                  {acting ? 'Confirming…' : 'Confirm resolution'}
+                </button>
+              )}
+              {(selected.status === 'completed' || selected.status === 'rejected' || selected.status === 'citizen_confirmed') && (
+                <button type="button" className="btn btn-ghost btn-sm" disabled={acting} onClick={() => doReopen(selected)}>
+                  {acting ? 'Reopening…' : 'Reopen'}
+                </button>
+              )}
+            </div>
           </div>
         )}
       </Modal>
