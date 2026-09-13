@@ -14,7 +14,6 @@ import EmptyState from '../../components/ui/EmptyState';
 import ErrorState from '../../components/ui/ErrorState';
 import ProgressBar from '../../components/ui/ProgressBar';
 import Icon from '../../components/ui/Icon';
-import { wardLabel } from '../../lib/geography';
 import { formatNumber } from '../../lib/format';
 
 export default function CitizenDashboard() {

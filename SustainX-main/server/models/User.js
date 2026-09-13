@@ -33,7 +33,6 @@ const userSchema = new mongoose.Schema(
     // block is required for students and collectors
     block: {
       type: String,
-      enum: ['A', 'B', 'C', 'D', 'E'],
       default: null,
       validate: {
         validator: function (v) {
@@ -43,6 +42,35 @@ const userSchema = new mongoose.Schema(
         },
         message: 'Block is required for students and collectors',
       },
+    },
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    city: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    zone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    ward: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    area: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
     },
     avatar: {
       type: String,

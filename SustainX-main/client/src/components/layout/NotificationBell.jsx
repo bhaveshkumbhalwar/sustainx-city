@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import { getNotifications, markNotificationRead, markAllNotificationsRead } from '../../services/api';
 import NotificationItem from './NotificationItem';
 
+/* eslint-disable react-hooks/set-state-in-effect */
+
 export default function NotificationBell() {
-  const { user } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);

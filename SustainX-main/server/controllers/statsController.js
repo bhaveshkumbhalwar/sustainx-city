@@ -46,10 +46,13 @@ const getDashboardStats = async (req, res) => {
     const [totalOrders, deliveredOrders, failedAttempts, blockPerformance] = orderStats;
 
     res.json({
-      total: (statusMap['pending'] || 0) + (statusMap['in-progress'] || 0) + (statusMap['completed'] || 0),
+      total: statusAgg.reduce((acc, s) => acc + (Number(s.count) || 0), 0),
       pending: statusMap['pending'] || 0,
-      progress: statusMap['in-progress'] || 0,
-      done: statusMap['completed'] || 0,
+      assigned: statusMap['assigned'] || 0,
+      progress: (statusMap['in-progress'] || 0) + (statusMap['in_progress'] || 0),
+      done: (statusMap['completed'] || 0) + (statusMap['citizen_confirmed'] || 0),
+      reopened: statusMap['reopened'] || 0,
+      rejected: statusMap['rejected'] || 0,
       students: roleMap['student'] || 0,
       collectors: roleMap['collector'] || 0,
       // Advanced Metrics

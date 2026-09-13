@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "seed": "node seed.js"
+    "seed": "node seed.js",
+    "seed:city": "node seed-city.js",
+    "test": "node --test --test-concurrency=1 \"tests/*.test.js\""
   },
   "keywords": [],
   "author": "",

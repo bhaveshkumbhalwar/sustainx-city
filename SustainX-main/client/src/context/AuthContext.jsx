@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { loginUser, registerUser, getMe } from '../services/api';
 
+/* eslint-disable react-refresh/only-export-components, react-hooks/set-state-in-effect */
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {

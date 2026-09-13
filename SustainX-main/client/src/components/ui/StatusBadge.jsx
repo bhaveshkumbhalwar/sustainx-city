@@ -3,7 +3,10 @@ import Badge from './Badge';
 
 const TONE_BY_STATUS = {
   pending: 'info',
+  assigned: 'info',
   'in-progress': 'warning',
+  reopened: 'warning',
+  citizen_confirmed: 'success',
   completed: 'success',
   rejected: 'danger',
 };

@@ -1,18 +1,21 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const { createNotification } = require('./notificationController');
+const { createNotification, notifyMany } = require('../services/notificationService');
+const { ROLE_LABELS } = require('../config/roles');
+const { audit } = require('../services/auditService');
+const { sanitizeQuery } = require('../utils/validate');
 
 // @desc    Get all users (admin)
 // @route   GET /api/users
 const getUsers = async (req, res) => {
   try {
-    const { role } = req.query;
+    const role = sanitizeQuery(req.query.role);
     const filter = {};
     if (role) filter.role = role;
     const users = await User.find(filter).select('-password').sort({ createdAt: -1 });
     res.json(users);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
@@ -24,23 +27,27 @@ const getUserById = async (req, res) => {
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
+
+const VALID_ROLES = ['student', 'collector', 'admin'];
 
 // @desc    Create user (admin)
 // @route   POST /api/users
 const createUser = async (req, res) => {
   try {
-    const { role, name, email, dept, block, password } = req.body;
+    const { role, name, email, dept, block, phone, city, zone, ward, area, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Please fill all required fields (name, email, password)' });
     }
 
+    const resolvedRole = VALID_ROLES.includes(role) ? role : 'student';
+
     // Validate block for students and collectors — required by schema
-    if (['student', 'collector'].includes(role) && !block) {
-      return res.status(400).json({ message: `Block (A–E) is required when creating a ${role}` });
+    if (['student', 'collector'].includes(resolvedRole) && !block) {
+      return res.status(400).json({ message: `Block is required when creating a ${resolvedRole}` });
     }
 
     const existing = await User.findOne({ email: email.toLowerCase() });
@@ -50,30 +57,43 @@ const createUser = async (req, res) => {
 
     const userData = {
       password,
-      role: role || 'student',
+      role: resolvedRole,
       name,
       email: email.toLowerCase(),
       dept: dept || '',
+      phone: phone || '',
+      city: city || '',
+      zone: zone || '',
+      ward: ward || '',
+      area: area || '',
     };
 
     // Add block for student/collector roles (already validated above)
-    if (['student', 'collector'].includes(role) && block) {
-      userData.block = block.toUpperCase();
+    if (['student', 'collector'].includes(resolvedRole) && block) {
+      userData.block = String(block).toUpperCase();
     }
 
     const user = await User.create(userData);
-    console.log(`👤 [USERS] Created ${userData.role} | block: ${userData.block || 'N/A'} | email: ${userData.email}`);
+    console.log(`[USERS] Created ${userData.role} | block: ${userData.block || 'N/A'} | email: ${userData.email}`);
 
-    // ✅ Notify the new user
+    await audit({
+      actor: req.user,
+      action: 'user.created',
+      targetType: 'User',
+      targetId: user._id,
+      meta: { role: userData.role, email: userData.email },
+      req,
+    });
+
     await createNotification(
       user._id,
-      `👋 Welcome to SustainX, ${user.name}! Your account as a ${user.role} has been created.`,
+      `Welcome to SustainX, ${user.name}! Your account as a ${ROLE_LABELS[userData.role] || userData.role} has been created.`,
       'info'
     );
 
     res.status(201).json(user.toJSON());
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
@@ -89,15 +109,22 @@ const updateUser = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized' });
     }
 
-    const allowedFields = ['name', 'email', 'dept', 'avatar'];
+    const allowedFields = ['name', 'email', 'dept', 'avatar', 'phone', 'block', 'city', 'zone', 'ward', 'area'];
+    // Only admins may toggle account status
+    if (req.user.role === 'admin') allowedFields.push('isActive');
     allowedFields.forEach((field) => {
-      if (req.body[field] !== undefined) user[field] = req.body[field];
+      if (req.body[field] !== undefined) user[field] = field === 'block' ? String(req.body[field]).toUpperCase() : req.body[field];
     });
 
     await user.save();
+
+    if (req.user.role === 'admin') {
+      await audit({ actor: req.user, action: 'user.updated', targetType: 'User', targetId: user._id, meta: req.body, req });
+    }
+
     res.json(user.toJSON());
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
@@ -132,7 +159,7 @@ const changePassword = async (req, res) => {
     await user.save();
     res.json({ message: 'Password updated successfully' });
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
@@ -142,9 +169,10 @@ const deleteUser = async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+    await audit({ actor: req.user, action: 'user.deleted', targetType: 'User', targetId: user._id, meta: { name: user.name, email: user.email }, req });
     res.json({ message: `User ${user.name} deleted` });
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 

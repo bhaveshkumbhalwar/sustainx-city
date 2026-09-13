@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
 import { getComplaints } from '../../services/api';
-import { toComplaintsUi, statusLabel, sourceLabel } from '../../adapters/complaint.adapter';
+import { toComplaintsUi, sourceLabel } from '../../adapters/complaint.adapter';
 import PageHeader from '../../components/ui/PageHeader';
 import DataTable from '../../components/ui/DataTable';
 import SectionCard from '../../components/ui/SectionCard';

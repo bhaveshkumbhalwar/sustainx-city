@@ -7,7 +7,6 @@ import PageHeader from '../../components/ui/PageHeader';
 import SectionCard from '../../components/ui/SectionCard';
 import StatCard from '../../components/ui/StatCard';
 import Modal from '../../components/ui/Modal';
-import Icon from '../../components/ui/Icon';
 import EmptyState from '../../components/ui/EmptyState';
 
 const EARN_STEPS = [

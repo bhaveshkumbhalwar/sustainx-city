@@ -139,6 +139,7 @@ html, body, #root { height: 100%; }
 
 .app-sidebar-footer { padding: var(--space-3); border-top: 1px solid var(--sidebar-border-clr); display: flex; flex-direction: column; gap: var(--space-2); }
 .sidebar-user { display: flex; align-items: center; gap: var(--space-2); }
+.sidebar-user-meta { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .sidebar-user-name { font-weight: 700; font-size: var(--text-sm); color: var(--sidebar-txt); overflow: hidden; text-overflow: ellipsis; }
 .sidebar-user-role { font-size: var(--text-xs); color: var(--sidebar-txt-muted); }
 
@@ -718,3 +719,24 @@ html, body, #root { height: 100%; }
 .profile-dl { display: flex; flex-direction: column; }
 .profile-dl .detail-row { border-bottom: 1px dashed var(--border); }
 .profile-dl .detail-row:last-child { border-bottom: none; }
+
+/* AI / operations patterns */
+.ai-cards { display: flex; flex-direction: column; gap: var(--space-3); }
+.ai-card { display: flex; align-items: flex-start; gap: var(--space-3); padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--color-surface-3); }
+.ai-card > svg { color: var(--clr-green-dark); flex-shrink: 0; margin-top: 1px; }
+[data-theme="dark"] .ai-card > svg { color: var(--clr-green); }
+.ai-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.ai-card-text { font-size: var(--text-sm); font-weight: 600; color: var(--txt-primary); line-height: 1.4; }
+.ai-card-meta { display: flex; align-items: center; gap: var(--space-2); }
+
+.ward-coverage { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: var(--space-4); }
+.ward-chip { display: flex; align-items: center; gap: var(--space-3); padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--color-surface-3); }
+.ward-chip-code { width: 34px; height: 34px; border-radius: 10px; background: var(--bg-sidebar-item); color: var(--clr-green-dark); display: grid; place-items: center; font-weight: 800; flex-shrink: 0; }
+[data-theme="dark"] .ward-chip-code { color: var(--clr-green); }
+.ward-chip strong { display: block; color: var(--txt-primary); font-size: var(--text-sm); }
+.ward-chip-zone { font-size: var(--text-xs); color: var(--txt-muted); }
+
+.ward-perf-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--color-surface-3); flex-wrap: wrap; }
+.ward-perf-name { font-weight: 800; color: var(--txt-primary); font-size: var(--text-sm); }
+.ward-perf-stats { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+.ward-perf-score { font-size: var(--text-xs); color: var(--txt-muted); font-weight: 600; }

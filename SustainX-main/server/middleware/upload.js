@@ -1,6 +1,24 @@
 const multer = require("multer");
 const cloudinary = require("../config/cloudinary");
 const streamifier = require("streamifier");
+const ApiError = require("../utils/ApiError");
+
+/**
+ * Upload a proof/attachment image.
+ * Uses Cloudinary by default. When UPLOAD_DRIVER=local (dev/tests without
+ * Cloudinary credentials) it stores a clearly-marked demo reference instead
+ * of failing the whole operation.
+ */
+const uploadImage = async (file, folder = "sustainx") => {
+  if (!file || !file.buffer) {
+    throw new ApiError(400, "No file buffer provided for image upload");
+  }
+  if (process.env.UPLOAD_DRIVER === "local") {
+    const ext = (file.originalname || "image").split(".").pop().toLowerCase() || "bin";
+    return `${folder}/${Date.now()}-${file.fieldname || "image"}.${ext} (demo-local-upload)`;
+  }
+  return uploadToCloudinary(file, folder);
+};
 
 // ─── Use memoryStorage (works on Render, Heroku, etc.) ───
 const storage = multer.memoryStorage();
@@ -77,3 +95,4 @@ const uploadToCloudinary = (file, folder = "sustainx") => {
 
 module.exports = upload;
 module.exports.uploadToCloudinary = uploadToCloudinary;
+module.exports.uploadImage = uploadImage;

@@ -9,7 +9,6 @@ const binDataSchema = new mongoose.Schema(
     },
     block: {
       type: String,
-      enum: ['A', 'B', 'C', 'D', 'E'],
       required: true,
       index: true,
     },

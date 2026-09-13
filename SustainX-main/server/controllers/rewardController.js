@@ -1,23 +1,27 @@
 const Reward = require('../models/Reward');
 const User = require('../models/User');
-const { createNotification } = require('./notificationController');
+const ApiError = require('../utils/ApiError');
+const { credit } = require('../services/rewardService');
 
-// @desc    Get rewards for a user
+// @desc    Get rewards for a user (admin sees all; others see own)
 // @route   GET /api/rewards
 const getRewards = async (req, res) => {
   try {
     const filter = {};
-    if (req.query.user) filter.user = req.query.user;
-    else if (req.query.studentId) filter.user = req.query.studentId; // fallback mapping
+    if (req.user.role === 'admin') {
+      if (req.query.user) filter.user = req.query.user;
+    } else {
+      filter.user = req.user._id;
+    }
     const rewards = await Reward.find(filter).populate('user', 'name email').sort({ date: -1 });
     res.json(rewards);
   } catch (err) {
-    console.error("ERROR:", err);
+    console.error('ERROR:', err);
     res.status(500).json({ message: err.message });
   }
 };
 
-// @desc    Award points to user
+// @desc    Award points to user (server-verified, admin only)
 // @route   POST /api/rewards
 const addReward = async (req, res) => {
   try {
@@ -28,35 +32,20 @@ const addReward = async (req, res) => {
       return res.status(400).json({ message: 'Please provide user, activity, and points' });
     }
 
-    if (points < 1) {
-      return res.status(400).json({ message: 'Points must be at least 1' });
-    }
-
-    // Find user and increment points
-    const user = await User.findById(finalTargetId);
-    if (!user) return res.status(404).json({ message: 'User not found' });
-
-    user.rewardPoints = (user.rewardPoints || 0) + Number(points);
-    await user.save();
-
-    const reward = await Reward.create({
-      user: user._id, // Relation using _id
+    const result = await credit({
+      userId: finalTargetId,
       activity,
       points: Number(points),
-      date: new Date(),
+      reason: `Admin award via /api/rewards`,
+      refType: 'admin_reward',
+      actorId: req.user._id,
     });
 
-    // ✅ Notify User
-    await createNotification(
-      user._id,
-      `🏆 Reward Credited: +${points} pts for "${activity}"`,
-      'reward'
-    );
-
-    res.status(201).json({ reward, updatedPoints: user.rewardPoints });
+    res.status(201).json({ reward: result.reward, updatedPoints: result.updatedPoints });
   } catch (err) {
-    console.error("ERROR:", err);
-    res.status(500).json({ message: err.message });
+    const statusCode = err.isOperational ? err.statusCode || 400 : 500;
+    console.error('ERROR:', err);
+    res.status(statusCode).json({ message: err.message });
   }
 };
 

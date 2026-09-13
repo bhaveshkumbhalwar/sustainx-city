@@ -24,7 +24,6 @@ export default function MapContainer({
 
   useEffect(() => {
     let map;
-    let layerGroup;
     let mounted = true;
 
     const coords = markers.filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng));

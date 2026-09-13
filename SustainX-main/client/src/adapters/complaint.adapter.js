@@ -7,9 +7,12 @@ import { timeAgo } from '../lib/format';
 
 export const STATUS_META = {
   pending: { label: 'Submitted', tone: 'info', order: 0 },
+  assigned: { label: 'Assigned', tone: 'info', order: 0 },
   'in-progress': { label: 'In Progress', tone: 'warning', order: 1 },
   in_progress: { label: 'In Progress', tone: 'warning', order: 1 },
+  citizen_confirmed: { label: 'Citizen Confirmed', tone: 'success', order: 2 },
   completed: { label: 'Resolved', tone: 'success', order: 2 },
+  reopened: { label: 'Reopened', tone: 'warning', order: 3 },
   rejected: { label: 'Rejected', tone: 'danger', order: 3 },
 };
 
@@ -38,7 +41,7 @@ export function derivePriority(c) {
 
 export function statusOpen(c) {
   const s = normalizeStatus(c?.status);
-  return s !== 'completed' && s !== 'rejected';
+  return s !== 'completed' && s !== 'rejected' && s !== 'citizen_confirmed';
 }
 
 export function toComplaintUi(raw) {

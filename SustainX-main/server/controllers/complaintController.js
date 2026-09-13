@@ -1,22 +1,27 @@
 const Complaint = require('../models/Complaint');
-const User = require('../models/User');
-const { uploadToCloudinary } = require('../middleware/upload');
-const { createNotification } = require('./notificationController');
+const { uploadImage } = require('../middleware/upload');
+const complaintService = require('../services/complaintService');
+const { escalateIfBreached, remainingMsFor } = require('../services/slaService');
+const ApiError = require('../utils/ApiError');
+const { sanitizeQuery } = require('../utils/validate');
 
 // @desc    Get all complaints (with role-based filtering)
 // @route   GET /api/complaints
 const getComplaints = async (req, res) => {
   try {
-    const { status } = req.query;
+    const status = sanitizeQuery(req.query.status);
+    const priority = sanitizeQuery(req.query.priority);
+    const type = sanitizeQuery(req.query.type);
     const query = {};
 
     if (status) query.status = status;
+    if (priority) query.priority = priority;
+    if (type) query.type = type;
 
     // Role-based filtering
     if (req.user.role === 'student') {
       query.user = req.user.id;
     } else if (req.user.role === 'collector') {
-      // Collectors only see complaints in their assigned block
       query.block = req.user.block;
     }
 
@@ -25,7 +30,15 @@ const getComplaints = async (req, res) => {
       .populate('assignedTo', 'name')
       .sort({ createdAt: -1 });
 
-    res.json(complaints);
+    // Refresh breach flag (non-persistent escalation check)
+    const results = complaints.map((c) => {
+      escalateIfBreached(c);
+      const obj = c.toJSON();
+      if (c.slaDeadline) obj.slaRemainingMs = remainingMsFor(c.slaDeadline);
+      return obj;
+    });
+
+    res.json(results);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
@@ -43,7 +56,7 @@ const getComplaintById = async (req, res) => {
       return res.status(404).json({ message: 'Complaint not found' });
     }
 
-    // Security check — extract the raw userId whether populated or not
+    // Security check
     const complaintUserId = complaint.user?._id
       ? complaint.user._id.toString()
       : complaint.user?.toString();
@@ -55,83 +68,51 @@ const getComplaintById = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to view other blocks' });
     }
 
-    res.json(complaint);
+    escalateIfBreached(complaint);
+    const result = complaint.toJSON();
+    if (complaint.slaDeadline) result.slaRemainingMs = remainingMsFor(complaint.slaDeadline);
+    res.json(result);
   } catch (err) {
-    console.error("❌ [GET COMPLAINT]:", err.message);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    console.error('[GET COMPLAINT]:', err.message);
+    res.status(500).json({ message: 'Server error' });
   }
 };
-
 
 // @desc    Submit a new complaint
 // @route   POST /api/complaints
 const submitComplaint = async (req, res) => {
   try {
-    const { location, wasteType, description, block, type } = req.body;
+    const { location, wasteType, description, block, type, binId, lat, lng, address, priority } = req.body;
 
-    if (!location || !wasteType || !description || !block) {
-      return res.status(400).json({ message: 'Please fill all required fields' });
-    }
-
-    // Handle image upload
     let imageUrl = null;
-    console.log(`📸 [SUBMIT] req.file present: ${!!req.file}`, req.file ? { fieldname: req.file.fieldname, mimetype: req.file.mimetype, size: req.file.size, hasBuffer: !!req.file.buffer } : 'NO FILE');
-
     if (req.file) {
       try {
-        imageUrl = await uploadToCloudinary(req.file, 'sustainx/complaints');
-        console.log(`✅ [SUBMIT] Cloudinary URL: ${imageUrl}`);
+        imageUrl = await uploadImage(req.file, 'sustainx/complaints');
       } catch (uploadErr) {
-        console.error("❌ [SUBMIT] Cloudinary upload failed:", uploadErr.message);
-        // Continue without image rather than failing the whole complaint
+        console.error('[SUBMIT] Upload failed:', uploadErr.message);
       }
     }
 
-    const complaintId = 'COMP-' + Date.now();
-
-    const complaint = await Complaint.create({
-      complaintId,
-      user: req.user.id,
+    const complaint = await complaintService.submit({
+      actor: { id: req.user.id, role: req.user.role, block: req.user.block },
       location,
       wasteType,
       description,
-      block: block.toUpperCase(),
+      block: String(block || req.user.block || 'A'),
+      type,
+      binId,
+      lat: lat != null ? Number(lat) : null,
+      lng: lng != null ? Number(lng) : null,
+      address,
+      priority,
       image: imageUrl,
-      type: type || 'complaint',
-      status: 'pending',
-      statusHistory: [
-        {
-          status: 'pending',
-          note: 'Complaint submitted',
-          updatedBy: req.user.id,
-          timestamp: new Date(),
-        },
-      ],
     });
-
-    console.log(`✅ [SUBMIT] Saved ${complaintId} | image=${complaint.image}`);
-
-    // ✅ Notify Student about registration
-    await createNotification(
-      req.user.id,
-      `📢 Your complaint ${complaintId} has been registered successfully!`,
-      'complaint'
-    );
-
-    // ✅ Notify Admins about new complaint
-    const admins = await User.find({ role: 'admin' });
-    for (const admin of admins) {
-      await createNotification(
-        admin._id,
-        `📋 New complaint ${complaintId} filed in Block ${block.toUpperCase()}`,
-        'complaint'
-      );
-    }
 
     res.status(201).json(complaint);
   } catch (err) {
-    console.error("🔥 [SUBMIT] ERROR:", err.message);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    const statusCode = err.isOperational ? err.statusCode || 400 : 500;
+    console.error('[SUBMIT] ERROR:', err.message);
+    res.status(statusCode).json({ message: err.isOperational ? err.message : 'Internal Server Error' });
   }
 };
 
@@ -139,54 +120,21 @@ const submitComplaint = async (req, res) => {
 // @route   PUT /api/complaints/:id/status
 const updateComplaintStatus = async (req, res) => {
   try {
-    const { status, note } = req.body;
+    const { status, note, assignedTo } = req.body;
     const { id } = req.params;
 
-    const complaint = await Complaint.findOne({ complaintId: id.toUpperCase() });
-
-    if (!complaint) {
-      return res.status(404).json({ message: 'Complaint not found' });
-    }
-
-    // Security
-    if (req.user.role === 'collector' && complaint.block !== req.user.block) {
-      return res.status(403).json({ message: 'Not authorized to update other blocks' });
-    }
-
-    // If status is moving to in-progress, assign to the current collector
-    if (req.user.role === 'collector' && !complaint.assignedTo) {
-      complaint.assignedTo = req.user._id;
-    }
-
-    complaint.status = status;
-    complaint.statusHistory.push({
+    const complaint = await complaintService.transition({
+      complaintId: id,
+      actor: req.user,
       status,
-      note: note || `Status updated to ${status}`,
-      updatedBy: req.user.id,
-      timestamp: new Date(),
+      note,
+      assignedTo,
     });
-
-    await complaint.save();
-
-    // ✅ Notify Student about assignment if just assigned
-    if (status === 'in-progress' || status === 'in_progress') {
-      await createNotification(
-        complaint.user,
-        `🚛 Collector ${req.user.name} has picked up your complaint ${complaint.complaintId}`,
-        'complaint'
-      );
-    }
-
-    // ✅ Notify Student about status update
-    await createNotification(
-      complaint.user,
-      `🔍 Complaint ${complaint.complaintId} status updated to: ${status}`,
-      'complaint'
-    );
 
     res.json(complaint);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    const statusCode = err.isOperational ? err.statusCode || 400 : 500;
+    res.status(statusCode).json({ message: err.message });
   }
 };
 
@@ -194,70 +142,25 @@ const updateComplaintStatus = async (req, res) => {
 // @route   POST /api/complaints/complete/:id
 const completeComplaint = async (req, res) => {
   try {
-    const { id } = req.params;
-    console.log(`🚀 [COMPLETE] Request for: ${id}`);
-
-    // ── Step 1: Validate file ──
     if (!req.file) {
-      console.log("❌ [COMPLETE] No file in request");
       return res.status(400).json({ message: 'Proof image is required.' });
     }
 
-    console.log("📸 [COMPLETE] File received:", {
-      fieldname: req.file.fieldname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      hasBuffer: !!req.file.buffer,
-    });
-
-    // ── Step 2: Find complaint ──
-    const complaint = await Complaint.findOne({ complaintId: id.toUpperCase() });
-    if (!complaint) {
-      console.log(`❌ [COMPLETE] Not found: ${id}`);
-      return res.status(404).json({ message: 'Complaint not found' });
-    }
-
-    // ── Step 3: Auth check ──
-    const userId = (req.user._id || req.user.id).toString();
-    const assignedId = complaint.assignedTo ? complaint.assignedTo.toString() : null;
-    if (assignedId && assignedId !== userId) {
-      console.log(`❌ [COMPLETE] Auth: user=${userId} assigned=${assignedId}`);
-      return res.status(403).json({ message: 'Only the assigned collector can complete this.' });
-    }
-
-    // ── Step 4: Upload to Cloudinary ──
     let imageUrl;
     try {
-      console.log("☁️ [COMPLETE] Uploading to Cloudinary...");
-      imageUrl = await uploadToCloudinary(req.file, 'sustainx/completions');
-      console.log("✅ [COMPLETE] Cloudinary URL:", imageUrl);
+      imageUrl = await uploadImage(req.file, 'sustainx/completions');
     } catch (uploadErr) {
-      console.error("❌ [COMPLETE] Cloudinary FAILED:", uploadErr.message);
+      console.error('[COMPLETE] Upload FAILED:', uploadErr.message);
       return res.status(500).json({
-        message: 'Image upload to Cloudinary failed',
-        error: uploadErr.message,
+        message: 'Image upload failed',
       });
     }
 
-    // ── Step 5: Save to DB ──
-    complaint.status = 'completed';
-    complaint.completionImage = imageUrl;
-    complaint.statusHistory.push({
-      status: 'completed',
-      note: 'Completed with image proof',
-      updatedBy: req.user._id,
-      timestamp: new Date(),
+    const complaint = await complaintService.complete({
+      complaintId: req.params.id,
+      actor: req.user,
+      image: imageUrl,
     });
-
-    await complaint.save();
-    console.log(`✅ [COMPLETE] DB saved: ${complaint.complaintId}`);
-
-    // ── Step 6: Notify (non-blocking) ──
-    createNotification(
-      complaint.user,
-      `✅ Your complaint ${complaint.complaintId} has been completed!`,
-      'complaint'
-    ).catch(e => console.error("⚠️ Notification error:", e.message));
 
     return res.json({
       success: true,
@@ -265,13 +168,42 @@ const completeComplaint = async (req, res) => {
       complaintId: complaint.complaintId,
       completionImage: imageUrl,
     });
-
   } catch (err) {
-    console.error("🔥 [COMPLETE] FATAL:", err);
-    return res.status(500).json({
-      message: `Server error: ${err.message}`,
-      error: err.message,
+    const statusCode = err.isOperational ? err.statusCode || 400 : 500;
+    console.error('[COMPLETE] FATAL:', err.message);
+    return res.status(statusCode).json({
+      message: err.isOperational ? err.message : 'Internal Server Error',
     });
+  }
+};
+
+// @desc    Citizen confirms resolution
+// @route   POST /api/complaints/:id/confirm
+const citizenConfirmComplaint = async (req, res) => {
+  try {
+    const complaint = await complaintService.citizenConfirm({
+      complaintId: req.params.id,
+      actor: req.user,
+    });
+    res.json(complaint);
+  } catch (err) {
+    const statusCode = err.isOperational ? err.statusCode || 400 : 500;
+    res.status(statusCode).json({ message: err.message });
+  }
+};
+
+// @desc    Reopen a resolved or rejected complaint
+// @route   POST /api/complaints/:id/reopen
+const reopenComplaint = async (req, res) => {
+  try {
+    const complaint = await complaintService.reopen({
+      complaintId: req.params.id,
+      actor: req.user,
+    });
+    res.json(complaint);
+  } catch (err) {
+    const statusCode = err.isOperational ? err.statusCode || 400 : 500;
+    res.status(statusCode).json({ message: err.message });
   }
 };
 
@@ -281,4 +213,6 @@ module.exports = {
   submitComplaint,
   updateComplaintStatus,
   completeComplaint,
+  citizenConfirmComplaint,
+  reopenComplaint,
 };

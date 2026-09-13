@@ -12,7 +12,7 @@ import { timeAgo } from '../../lib/format';
 export default function NotificationsPage() {
   const { showToast } = useToast();
   const [items, setItems] = useState(null);
-  const { data, loading, error, refetch } = useFetch(async () => {
+  const { data, loading, error } = useFetch(async () => {
     const res = await getNotifications();
     const list = res.data || [];
     setItems(list);

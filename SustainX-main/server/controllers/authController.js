@@ -1,7 +1,8 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const Reward = require('../models/Reward');
-const { createNotification } = require('./notificationController');
+const rewardService = require('../services/rewardService');
+const { notifyMany } = require('../services/notificationService');
+const { normalizeRole } = require('../config/roles');
 
 // Generate JWT with id, role, and block embedded
 const generateToken = (user) => {
@@ -21,7 +22,7 @@ const generateToken = (user) => {
 const login = async (req, res) => {
   try {
     const { email, password, role } = req.body;
-    console.log("Login attempt:", req.body);
+    console.log("Login attempt for:", email);
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Please provide email and password' });
@@ -30,19 +31,24 @@ const login = async (req, res) => {
     const user = await User.findOne({ email: email.trim().toLowerCase() });
 
     if (!user) {
-      console.log(`❌ [LOGIN]: User not found: ${email}`);
+      console.log(`[LOGIN]: User not found: ${email}`);
       return res.status(401).json({ message: 'Invalid credentials' });
+    }
+
+    if (user.isActive === false) {
+      return res.status(401).json({ message: 'This account has been deactivated. Contact your administrator.' });
     }
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      console.log(`❌ [LOGIN]: Password mismatch for ${email}`);
+      console.log(`[LOGIN]: Password mismatch for ${email}`);
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Role mismatch check
-    if (role && user.role !== role) {
-      console.log(`❌ [LOGIN]: Role mismatch for ${email}. Expected ${role}, got ${user.role}`);
+    // Role mismatch check (aliases like citizen/field_officer are normalized)
+    const expectedRole = normalizeRole(role) || role;
+    if (expectedRole && user.role !== expectedRole) {
+      console.log(`[LOGIN]: Role mismatch for ${email}. Expected ${expectedRole}, got ${user.role}`);
       return res.status(401).json({
         message: `This account is not a ${role} account. Please select the correct role.`,
       });
@@ -81,36 +87,27 @@ const register = async (req, res) => {
       name,
       email: email.toLowerCase(),
       dept: dept || '',
-      block: studentBlock,
-      rewardPoints: 100,
+      block: String(studentBlock).toUpperCase(),
+      rewardPoints: 0,
     });
 
-    // Create signup bonus reward entry
-    await Reward.create({
-      user: user._id,
+    // Create signup bonus through the server-verified reward pipeline
+    await rewardService.credit({
+      userId: user._id,
       activity: 'Signup Bonus',
       points: 100,
-      date: new Date(),
+      reason: 'Signup welcome bonus',
+      actorId: user._id,
     });
 
-    console.log(`🎁 [SIGNUP] New student ${user.email} received 100 pts signup bonus`);
-
-    // ✅ Notify Student
-    await createNotification(
-      user._id,
-      '🎉 100 Points Credited! Welcome Bonus!',
-      'reward'
-    );
+    console.log(`[SIGNUP] New student ${user.email} received 100 pts signup bonus`);
 
     // ✅ Notify Admins
-    const admins = await User.find({ role: 'admin' });
-    for (const admin of admins) {
-      await createNotification(
-        admin._id,
-        `🆕 New user registered: ${user.name} (${user.email})`,
-        'user'
-      );
-    }
+    await notifyMany(
+      (await User.find({ role: 'admin' }).select('_id')).map((a) => a._id),
+      `New user registered: ${user.name} (${user.email})`,
+      'user'
+    );
 
     res.status(201).json({
       token: generateToken(user),

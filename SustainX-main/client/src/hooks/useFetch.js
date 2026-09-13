@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 
+/* eslint-disable react-hooks/set-state-in-effect */
 // Generic API data hook: manages loading / error / data + refresh.
 //   const { data, loading, error, refetch } = useFetch(fetcher, deps)
 export function useFetch(fetcher, deps = [], immediate = true) {

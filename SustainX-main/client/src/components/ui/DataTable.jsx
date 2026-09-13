@@ -137,8 +137,8 @@ export default function DataTable({
                 </td>
               </tr>
             ) : (
-              paged.map((row) => (
-                <tr key={row[keyField] ?? Math.random()}>
+              paged.map((row, rowIndex) => (
+                <tr key={row[keyField] ?? `row-${rowIndex}`}>
                   {columns.map((c, i) => (
                     <td
                       key={c.key || i}

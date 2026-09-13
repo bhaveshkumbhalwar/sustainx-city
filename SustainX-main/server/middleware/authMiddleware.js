@@ -24,15 +24,12 @@ const protect = async (req, res, next) => {
     if (!user) {
       return res.status(401).json({ message: 'User not found' });
     }
+    if (user.isActive === false) {
+      return res.status(401).json({ message: 'This account has been deactivated. Contact your administrator.' });
+    }
 
     // Attach user to request — this includes role, block, userId etc.
     req.user = user;
-    console.log("AUTH USER:", req.user);
-
-    // Debug: verify block is available (remove in production)
-    if (user.role === 'collector') {
-      console.log(`🔑 [AUTH] Collector ${user.userId} authenticated | block: ${JSON.stringify(user.block)}`);
-    }
 
     next();
   } catch (err) {

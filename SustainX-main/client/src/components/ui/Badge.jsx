@@ -1,6 +1,4 @@
 // Generic semantic badge. tone: neutral | info | success | warning | danger | high
-export const TONES = ['neutral', 'info', 'success', 'warning', 'danger', 'high'];
-
 export default function Badge({ tone = 'neutral', children, dot, className = '', icon }) {
   return (
     <span className={`badge badge-tone-${tone} ${className}`}>

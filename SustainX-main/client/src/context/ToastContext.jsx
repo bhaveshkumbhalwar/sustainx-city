@@ -1,5 +1,7 @@
 import { createContext, useContext, useState, useCallback } from 'react';
 
+/* eslint-disable react-refresh/only-export-components */
+
 const ToastContext = createContext(null);
 
 let toastId = 0;

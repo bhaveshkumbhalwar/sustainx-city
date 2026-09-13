@@ -1,10 +1,10 @@
 const StoreItem = require('../models/StoreItem');
 const Order = require('../models/Order');
 const User = require('../models/User');
-const Reward = require('../models/Reward');
+const { credit, debit } = require('../services/rewardService');
 
 const OrderLog = require('../models/OrderLog');
-const { createNotification } = require('./notificationController');
+const { createNotification } = require('../services/notificationService');
 
 // ── Generate sequential order ID ──
 const generateOrderId = async () => {
@@ -79,7 +79,6 @@ const createStoreItem = async (req, res) => {
 // @route   POST /api/store/redeem
 const redeemItem = async (req, res) => {
   try {
-    console.log("USER:", req.user);
     const { itemId } = req.body;
 
     if (!itemId) {
@@ -103,29 +102,45 @@ const redeemItem = async (req, res) => {
       return res.status(404).json({ message: 'User not found.' });
     }
 
-    // NEW: Check for block assignment BEFORE saving (prevents validation crash)
     if (!user.block) {
       return res.status(400).json({
         message: 'Your account lacks a Campus Block assignment. Please update your profile or contact administrator before redeeming.',
       });
     }
 
-    // 4. Check points
     if (user.rewardPoints < item.pointsRequired) {
       return res.status(400).json({
         message: `Insufficient points. Need ${item.pointsRequired}, you have ${user.rewardPoints || 0}.`,
       });
     }
 
-    // 5. Deduct points
-    user.rewardPoints -= item.pointsRequired;
-    await user.save();
+    // 4. Atomic stock decrement FIRST — prevents two concurrent requests both succeeding
+    const stockDecremented = await StoreItem.findOneAndUpdate(
+      { _id: itemId, isActive: true, stock: { $gt: 0 } },
+      { $inc: { stock: -1 } },
+      { returnDocument: 'after' }
+    );
+    if (!stockDecremented) {
+      return res.status(400).json({ message: 'Item went out of stock just before redemption. Please try again.' });
+    }
 
-    // 6. Decrease stock
-    item.stock -= 1;
-    await item.save();
+    // 5. Deduct points (atomic via findOneAndUpdate with balance guard)
+    let order;
+    try {
+      await debit({
+        userId: user._id,
+        points: item.pointsRequired,
+        reason: `Store redemption of "${item.name}"`,
+        refType: 'store_item',
+        refId: item._id,
+      });
+    } catch (debitErr) {
+      // Roll back stock if debit fails (e.g. concurrent spend drained points)
+      await StoreItem.findByIdAndUpdate(itemId, { $inc: { stock: 1 } });
+      throw debitErr;
+    }
 
-    // ── Generate Unique 6-Char Pickup Code ──
+    // 6. Generate unique pickup code
     const generateCode = () => Math.random().toString(36).substring(2, 8).toUpperCase();
     let code;
     let exists = true;
@@ -134,17 +149,16 @@ const redeemItem = async (req, res) => {
       exists = await Order.findOne({ pickupCode: code });
     }
 
-    // ── Generate Expiration Date (24h) ──
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24);
 
-    // 8. Create order
+    // 7. Create order
     const orderId = await generateOrderId();
 
-    const order = await Order.create({
+    order = await Order.create({
       orderId,
       userName: user.name,
-      user: user._id, // Relation using _id
+      user: user._id,
       block: user.block,
       item: item._id,
       itemName: item.name,
@@ -153,22 +167,19 @@ const redeemItem = async (req, res) => {
       expiresAt,
     });
 
-    console.log(`🛒 [ORDER] Created: ${order.orderId} | Block: ${order.block} | User: ${user._id}`);
-
-    // ✅ Notify Student
     await createNotification(
       user._id,
-      `🛒 Order ${order.orderId} placed successfully! Use code ${code} for pickup.`,
+      `Order ${order.orderId} placed successfully! Use code ${code} for pickup.`,
       'info'
     );
 
     res.status(201).json({
       order,
-      remainingPoints: user.rewardPoints,
+      remainingPoints: (await User.findById(user._id)).rewardPoints,
     });
   } catch (err) {
-    console.error("REDEEM ERROR:", err);
-    res.status(500).json({ message: err.message });
+    console.error("[ORDER] Error:", err.message);
+    res.status(500).json({ message: err.isOperational ? err.message : 'Internal Server Error' });
   }
 };
 
@@ -285,30 +296,34 @@ const updateOrderStatus = async (req, res) => {
 
     order.status = status;
 
-    // ── Reward Logic (Collector only) ──
+    // ── Reward Logic (Collector only, server-verified) ──
     if (status === 'delivered' && req.user.role === 'collector' && !order.rewardGiven) {
-      // Atomic increment of collector's rewardPoints
-      const collector = await User.findByIdAndUpdate(
-        req.user._id,
-        { $inc: { rewardPoints: 20 } },
-        { new: true }
-      );
-
-      if (collector) {
-        order.rewardGiven = true;
-        // Create Reward Log entry
-        await Reward.create({
-          user: req.user._id, // Relation using _id
-          activity: `Delivered Order ${order.orderId}`,
-          points: 20,
-        });
-        console.log(`🏆 [REWARD] Collector ${req.user._id} earned 20 pts for delivery ${order.orderId}`);
+      try {
+        // Atomic guard prevents double credit from concurrent delivery requests
+        const guarded = await Order.findOneAndUpdate(
+          { _id: order._id, rewardGiven: false },
+          { $set: { rewardGiven: true } },
+          { returnDocument: 'after' }
+        );
+        if (guarded) {
+          await credit({
+            userId: req.user._id,
+            activity: `Delivered Order ${order.orderId}`,
+            points: 20,
+            reason: 'Order delivered with verified pickup code',
+            refType: 'order',
+            refId: order._id,
+            actorId: req.user._id,
+          });
+        }
+      } catch (err) {
+        console.error('[REWARD] Delivery reward failed:', err.message);
       }
     }
 
     await order.save();
 
-    // ✅ Notify Student about status change
+    // Notify Student about status change
     const statusEmoji = status === 'delivered' ? '📦' : status === 'ready_for_pickup' ? '🎁' : '👍';
     const statusMsg = status === 'delivered' 
       ? `📦 Your order ${order.orderId} has been delivered!` 
@@ -324,8 +339,8 @@ const updateOrderStatus = async (req, res) => {
 
     res.json(order);
   } catch (err) {
-    console.error("ERROR:", err);
-    res.status(500).json({ message: err.message });
+    console.error("[ORDER] Error:", err.message);
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 
@@ -373,20 +388,18 @@ const getOrderById = async (req, res) => {
 
 const assignOrder = async (req, res) => {
   try {
-    console.log("--- ASSIGN DEBUG ---");
-    console.log("Order ID from Params:", req.params.id);
-    console.log("Collector ID from Auth:", req.user._id);
-
     const order = await Order.findById(req.params.id);
     
     if (!order) {
-      console.error("❌ Order NOT found by _id");
       return res.status(404).json({ message: 'Order not found' });
     }
 
-    console.log("Current order.assignedTo:", order.assignedTo);
+    // 1. Block-scope check: collectors may only take orders in their own block
+    if (order.block && req.user.block && order.block !== req.user.block) {
+      return res.status(403).json({ message: 'Access denied: order belongs to another block' });
+    }
 
-    // 1. Concurrency Check: Ensure not already assigned
+    // 2. Concurrency Check: Ensure not already assigned
     if (order.assignedTo) {
       return res.status(400).json({ message: `Order already assigned to ${order.assignedCollectorName}` });
     }
@@ -402,19 +415,17 @@ const assignOrder = async (req, res) => {
 
     await order.save();
     
-    console.log(`🤝 [SUCCESS] Order ${order.orderId} taken by Collector ${req.user._id}`);
-
-    // ✅ Notify Student
+    // Notify Student
     await createNotification(
       order.user,
-      `🤝 Collector ${req.user.name} has taken your order ${order.orderId} and is preparing it.`,
+      `Collector ${req.user.name} has taken your order ${order.orderId} and is preparing it.`,
       'info'
     );
 
     res.json(order);
   } catch (err) {
-    console.error("ASSIGN ERROR:", err);
-    res.status(500).json({ message: err.message });
+    console.error("[ORDER] Assign error:", err.message);
+    res.status(500).json({ message: 'Internal Server Error' });
   }
 };
 

@@ -5,7 +5,10 @@
   Description:
   Sends a POST request to the SustainX backend when the dustbin level
   (simulated or measured via Ultrasonic sensor) reaches >= 80%.
-  No authentication required — the endpoint is public.
+  Device authentication is required via X-Device-Id / X-Device-Key headers.
+  Generate matching credentials in the database with:
+    cd server && npm run seed-city
+  (or use IOT_ALLOW_PUBLIC_INGEST=true for local development only).
 */
 
 #include <WiFi.h>
@@ -15,12 +18,16 @@
 const char* ssid = "Hmm";
 const char* password = "password";
 
-// Backend URL (no API key needed)
+// Backend URL (requires device auth)
 const char* serverUrl = "http://172.22.254.141:5000/api/iot/data";
 
 // Dustbin Configuration
 const char* block = "A";       // Assigned block for this ESP32
-const char* binId = "BIN-A1";  // Unique ID for this specific dustbin
+const char* binId = "NMMC-BIN-001";  // Unique ID for this specific dustbin
+
+// Device credentials — provisioned by seed-city (see output table)
+const char* deviceId = "DEV-001";
+const char* apiKey = "sx-dev-key-001";
 
 void setup() {
   Serial.begin(115200);
@@ -47,8 +54,10 @@ void loop() {
       // Initialize HTTP request
       http.begin(serverUrl);
       
-      // Set headers (no API key required)
+      // Set headers
       http.addHeader("Content-Type", "application/json");
+      http.addHeader("X-Device-Id", deviceId);
+      http.addHeader("X-Device-Key", apiKey);
 
       // Prepare JSON payload with block, level, and binId
       String payload = "{\"block\":\"" + String(block) + "\", \"level\":" + String(fillLevelPercentage) + ", \"binId\":\"" + String(binId) + "\"}";
