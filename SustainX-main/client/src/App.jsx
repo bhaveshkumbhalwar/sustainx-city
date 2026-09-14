@@ -24,6 +24,7 @@ import ControlRoom from './pages/admin/ControlRoom';
 import LiveOperations from './pages/admin/LiveOperations';
 import AdminComplaints from './pages/admin/AdminComplaints';
 import AdminBins from './pages/admin/AdminBins';
+import BinDetail from './pages/admin/BinDetail';
 import AdminWards from './pages/admin/AdminWards';
 import AdminVehicles from './pages/admin/AdminVehicles';
 import AdminAnalytics from './pages/admin/AdminAnalytics';
@@ -115,6 +116,7 @@ function App() {
           <Route path="operations" element={<LiveOperations />} />
           <Route path="complaints" element={<AdminComplaints />} />
           <Route path="bins" element={<AdminBins />} />
+          <Route path="bins/:binId" element={<BinDetail />} />
           <Route path="wards" element={<AdminWards />} />
           <Route path="vehicles" element={<AdminVehicles />} />
           <Route path="analytics" element={<AdminAnalytics />} />

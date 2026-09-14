@@ -1,10 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useFetch } from '../../hooks/useFetch';
-import { useGeoIndex } from '../../hooks/useGeo';
-import { getComplaints, getBins, getIotBinData, getVehicles } from '../../services/api';
-import { toComplaintsUi } from '../../adapters/complaint.adapter';
-import { toBinsUi, mergeBinLevels } from '../../adapters/bin.adapter';
-import { coordForBin, coordForComplaint, coordForVehicle } from '../../services/geo';
+import { useOpsMap, buildOpsMarkers } from '../../hooks/useOpsMap';
+import { usePolling } from '../../hooks/usePolling';
+import { getVehicleHistory } from '../../services/api';
+import { binOperationalState } from '../../adapters/alerts.adapter';
 import { wardLabel } from '../../lib/geography';
 import PageHeader from '../../components/ui/PageHeader';
 import StatCard from '../../components/ui/StatCard';
@@ -12,47 +12,66 @@ import SectionCard from '../../components/ui/SectionCard';
 import Badge from '../../components/ui/Badge';
 import DataTable from '../../components/ui/DataTable';
 import EmptyState from '../../components/ui/EmptyState';
-import MapContainer from '../../components/maps/MapContainer';
-import { fmtDateTime } from '../../lib/format';
+import CityMap from '../../components/maps/CityMap';
+import Icon from '../../components/ui/Icon';
+import { fmtDateTime, timeAgo } from '../../lib/format';
 
 const VEHICLE_STATUS_TONE = { available: 'success', on_route: 'info', off_duty: 'neutral', maintenance: 'warning' };
 
-export default function LiveOperations() {
-  const { data: rawComplaints } = useFetch(getComplaints);
-  const { data: register } = useFetch(getBins);
-  const { data: readings } = useFetch(getIotBinData);
-  const { data: rawVehicles, loading: vehiclesLoading } = useFetch(getVehicles);
-  const geo = useGeoIndex();
+const LAYERS = [
+  { key: 'bins', label: 'Smart bins', tone: 'warning' },
+  { key: 'complaints', label: 'Complaints', tone: 'info' },
+  { key: 'vehicles', label: 'Vehicles', tone: 'success' },
+  { key: 'hotspots', label: 'Hotspots', tone: 'danger' },
+  { key: 'wards', label: 'Wards', tone: 'neutral' },
+];
 
-  const complaints = useMemo(() => toComplaintsUi(rawComplaints), [rawComplaints]);
-  const bins = useMemo(() => toBinsUi(mergeBinLevels(register, readings)), [register, readings]);
-  const vehicles = useMemo(() => (Array.isArray(rawVehicles) ? rawVehicles : []), [rawVehicles]);
+const HISTORY_RANGES = [
+  { key: '1h', label: 'Last 1 hour', ms: 3600 * 1000 },
+  { key: '6h', label: 'Last 6 hours', ms: 6 * 3600 * 1000 },
+  { key: 'day', label: 'Today', ms: 24 * 3600 * 1000 },
+];
+
+const PRIORITY_TONE = { low: 'neutral', medium: 'warning', high: 'danger', critical: 'danger' };
+
+export default function LiveOperations() {
+  const { complaints, bins, vehicles, hotspotRows, geo, loading, refetchAll } = useOpsMap();
+
+  usePolling(refetchAll, 45000);
+
+  const [selected, setSelected] = useState(null); // { kind, id }
+  const [mobileView, setMobileView] = useState('map');
+  const [historyRange, setHistoryRange] = useState(HISTORY_RANGES[1]);
 
   const markers = useMemo(() => {
-    const binMarkers = bins
-      .map((b) => {
-        const c = coordForBin(b, geo);
-        if (!c) return null;
-        return { id: `bin-${b.id}`, lat: c.lat, lng: c.lng, tone: b.state.tone, popup: { title: `Bin ${b.binId}`, desc: `${b.state.label} · ${b.level}%` } };
-      })
-      .filter(Boolean);
-    const complaintMarkers = complaints
-      .filter((c) => c.status !== 'completed')
-      .map((c) => {
-        const coord = coordForComplaint(c, geo);
-        if (!coord) return null;
-        return { id: `comp-${c.id}`, lat: coord.lat, lng: coord.lng, tone: 'info', popup: { title: c.id, desc: `${c.ward} · ${c.wasteType}` } };
-      })
-      .filter(Boolean);
-    const vehicleMarkers = vehicles
-      .map((v) => {
-        const coord = coordForVehicle(v);
-        if (!coord) return null;
-        return { id: `veh-${v._id}`, lat: coord.lat, lng: coord.lng, tone: 'success', popup: { title: `${v.plate} — ${v.type || 'vehicle'}`, desc: `Driver: ${v.driver?.name || '—'} · ${v.status}` } };
-      })
-      .filter(Boolean);
-    return [...binMarkers, ...complaintMarkers, ...vehicleMarkers];
-  }, [bins, complaints, vehicles, geo]);
+    const parts = buildOpsMarkers({ bins, complaints, vehicles, hotspotRows, geo });
+    return [
+      ...parts.binMarkers,
+      ...parts.complaintMarkers,
+      ...parts.vehicleMarkers,
+      ...parts.hotspotMarkers,
+      ...parts.wardMarkers,
+    ];
+  }, [bins, complaints, vehicles, hotspotRows, geo]);
+
+  const onMarkerSelect = (mk) => {
+    const [kind, ...rest] = String(mk.id).split(':');
+    setSelected({ kind, id: rest.join(':'), marker: mk });
+    setMobileView('map');
+  };
+
+  const selectedVehicleId = selected?.kind === 'vehicle' ? selected.id : null;
+  const historyFetch = useFetch(
+    () => (selectedVehicleId ? getVehicleHistory(selectedVehicleId, { limit: 200 }) : Promise.resolve({ data: [] })),
+    [selectedVehicleId],
+  );
+  const historyPoints = useMemo(() => {
+    const rows = Array.isArray(historyFetch.data) ? historyFetch.data : [];
+    // Time-window filtering inherently reads the clock; memoized on inputs.
+    // eslint-disable-next-line react-hooks/purity
+    const cutoff = Date.now() - historyRange.ms;
+    return rows.filter((p) => new Date(p.recordedAt).getTime() >= cutoff);
+  }, [historyFetch.data, historyRange]);
 
   const liveVehicles = vehicles.filter((v) => v.status === 'available' || v.status === 'on_route').length;
 
@@ -65,25 +84,131 @@ export default function LiveOperations() {
     { key: 'lastLocationUpdate', label: 'Last GPS', render: (row) => fmtDateTime(row.lastLocationUpdate) },
   ];
 
+  const renderDrawerBody = () => {
+    if (!selected) return null;
+    if (selected.kind === 'bin') {
+      const b = selected.marker.ref;
+      const st = binOperationalState(b);
+      return (
+        <>
+          <div className="detail-row"><span className="detail-label">Fill</span><span className="detail-value">{b.level}% (observed)</span></div>
+          <div className="detail-row"><span className="detail-label">State</span><Badge tone={st.tone}>{st.label}</Badge></div>
+          <div className="detail-row"><span className="detail-label">Ward</span><span className="detail-value">{b.ward}</span></div>
+          <div className="detail-row"><span className="detail-label">Last seen</span><span className="detail-value">{timeAgo(b.lastSeen || b.lastReadingAt)}</span></div>
+          <Link to={`/admin/bins/${encodeURIComponent(b.binId)}`} className="btn btn-primary btn-sm u-mt-1">Open bin detail</Link>
+        </>
+      );
+    }
+    if (selected.kind === 'complaint') {
+      const c = selected.marker.ref;
+      return (
+        <>
+          <div className="detail-row"><span className="detail-label">Priority</span><Badge tone={PRIORITY_TONE[c.priority] || 'info'}>{c.priority || '—'}</Badge></div>
+          <div className="detail-row"><span className="detail-label">Status</span><span className="detail-value">{c.status}</span></div>
+          <div className="detail-row"><span className="detail-label">Location</span><span className="detail-value">{c.location}</span></div>
+          <div className="detail-row"><span className="detail-label">SLA</span><span className="detail-value">{typeof c.slaRemainingMs === 'number' ? (c.slaRemainingMs < 0 ? 'Breached' : `${Math.round(c.slaRemainingMs / 3600000)}h left`) : '—'}</span></div>
+          <Link to="/admin/complaints" className="btn btn-primary btn-sm u-mt-1">Open complaints</Link>
+        </>
+      );
+    }
+    if (selected.kind === 'vehicle') {
+      const v = selected.marker.ref;
+      return (
+        <>
+          <div className="detail-row"><span className="detail-label">Status</span><Badge tone={VEHICLE_STATUS_TONE[v.status] || 'neutral'}>{v.status}</Badge></div>
+          <div className="detail-row"><span className="detail-label">Driver</span><span className="detail-value">{v.driver?.name || '—'}</span></div>
+          <div className="detail-row"><span className="detail-label">Last GPS</span><span className="detail-value">{fmtDateTime(v.lastLocationUpdate)}</span></div>
+          <div className="segmented u-mt-1" role="group" aria-label="History range">
+            {HISTORY_RANGES.map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                className={`segmented-btn ${historyRange.key === r.key ? 'segmented-active' : ''}`}
+                onClick={() => setHistoryRange(r)}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+          {historyFetch.loading ? (
+            <div className="skeleton skeleton-text u-mt-1" />
+          ) : historyPoints.length === 0 ? (
+            <p className="u-text-muted u-text-sm u-mt-1">No GPS points in this range.</p>
+          ) : (
+            <ul className="complaint-mini-list u-mt-1">
+              {historyPoints.slice(0, 8).map((p, i) => (
+                <li key={i} className="complaint-mini-item">
+                  <div className="complaint-mini-main">
+                    <div className="complaint-mini-title u-mono u-text-sm">
+                      {Number(p.lat).toFixed(4)}, {Number(p.lng).toFixed(4)}
+                    </div>
+                    <div className="complaint-mini-meta">{fmtDateTime(p.recordedAt)}{p.speed != null ? ` · ${p.speed} km/h` : ''}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+          {historyPoints.length > 8 && (
+            <p className="u-text-muted u-text-sm">Showing latest 8 of {historyPoints.length} points.</p>
+          )}
+        </>
+      );
+    }
+    return (
+      <div className="detail-row"><span className="detail-label">Info</span><span className="detail-value">{selected.marker?.popup?.desc || ''}</span></div>
+    );
+  };
+
   return (
     <>
-      <PageHeader title="Live Operations" subtitle="City-wide activity map and fleet status." icon="activity" />
+      <PageHeader
+        title="Live Operations"
+        subtitle="City-wide activity map and fleet status. Auto-refreshes every 45 seconds."
+        icon="activity"
+        actions={
+          <div className="segmented ops-view-toggle" role="group" aria-label="View">
+            <button type="button" className={`segmented-btn ${mobileView === 'map' ? 'segmented-active' : ''}`} onClick={() => setMobileView('map')}>Map</button>
+            <button type="button" className={`segmented-btn ${mobileView === 'list' ? 'segmented-active' : ''}`} onClick={() => setMobileView('list')}>List</button>
+          </div>
+        }
+      />
 
       <div className="stat-grid u-mb-1">
-        <StatCard icon="truck" label="Active vehicles" value={liveVehicles} loading={vehiclesLoading} />
+        <StatCard icon="truck" label="Active vehicles" value={liveVehicles} loading={loading} />
         <StatCard icon="map-pin" label="Active complaints" value={complaints.filter((c) => c.status !== 'completed').length} loading={false} tone="warning" />
         <StatCard icon="trash" label="Bins monitored" value={bins.length} loading={false} />
       </div>
 
-      <MapContainer markers={markers} title="Operations map" height={420} demoNote={null} />
+      <div className={mobileView === 'list' ? 'ops-hide-mobile' : ''}>
+        <CityMap
+          markers={markers}
+          layers={LAYERS}
+          selectedId={selected ? `${selected.kind}:${selected.id}` : null}
+          onSelect={onMarkerSelect}
+          title="Operations map"
+          height={420}
+        />
+      </div>
 
-      <div className="u-grid-2 u-mt-1">
+      {selected && (
+        <div className="map-drawer u-mt-1" role="dialog" aria-label="Selected map item">
+          <div className="map-drawer-head">
+            <span className="map-drawer-title">{selected.marker?.popup?.title || selected.id}</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected(null)} aria-label="Close details">
+              <Icon name="close" size={14} />
+            </button>
+          </div>
+          {renderDrawerBody()}
+        </div>
+      )}
+
+      <div className={`u-grid-2 u-mt-1 ${mobileView === 'map' ? 'ops-hide-mobile' : ''}`}>
         <SectionCard title="Vehicles" subtitle="Live fleet positions from field GPS reports">
           <DataTable
             columns={vehicleColumns}
             data={vehicles}
             keyField="_id"
-            loading={vehiclesLoading}
+            loading={loading}
             emptyTitle="No vehicles"
             emptyDescription="No fleet vehicles are registered yet."
           />

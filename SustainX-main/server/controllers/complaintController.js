@@ -12,11 +12,13 @@ const getComplaints = async (req, res) => {
     const status = sanitizeQuery(req.query.status);
     const priority = sanitizeQuery(req.query.priority);
     const type = sanitizeQuery(req.query.type);
+    const binId = sanitizeQuery(req.query.binId);
     const query = {};
 
     if (status) query.status = status;
     if (priority) query.priority = priority;
     if (type) query.type = type;
+    if (binId) query.binId = String(binId).trim().toUpperCase();
 
     // Role-based filtering
     if (req.user.role === 'student') {

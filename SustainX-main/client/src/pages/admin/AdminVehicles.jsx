@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useFetch } from '../../hooks/useFetch';
-import { getVehicles, createVehicleApi, deleteVehicleApi } from '../../services/api';
+import { getVehicles, createVehicleApi, deleteVehicleApi, getVehicleHistory } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { wardLabel } from '../../lib/geography';
 import { useWardOptions } from '../../hooks/useGeo';
@@ -17,13 +17,33 @@ const STATUS_TONE = { available: 'success', on_route: 'info', off_duty: 'neutral
 const STATUS_LABEL = { available: 'Available', on_route: 'On route', off_duty: 'Off duty', maintenance: 'Maintenance' };
 const VEHICLE_TYPES = ['compactor', 'tipper', 'mini_vehicle', 'tricycle', 'other'];
 
+const HISTORY_RANGES = [
+  { key: '1h', label: 'Last 1 hour', ms: 3600 * 1000 },
+  { key: '6h', label: 'Last 6 hours', ms: 6 * 3600 * 1000 },
+  { key: 'day', label: 'Today', ms: 24 * 3600 * 1000 },
+];
+
 export default function AdminVehicles() {
   const { showToast } = useToast();
   const { data, loading, refetch } = useFetch(getVehicles);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ plate: '', type: 'compactor', capacityKg: '', block: '' });
+  const [historyTarget, setHistoryTarget] = useState(null);
+  const [historyRange, setHistoryRange] = useState(HISTORY_RANGES[1]);
   const wardOptions = useWardOptions();
+
+  const historyFetch = useFetch(
+    () => (historyTarget ? getVehicleHistory(historyTarget._id, { limit: 200 }) : Promise.resolve({ data: [] })),
+    [historyTarget?._id],
+  );
+  const historyPoints = useMemo(() => {
+    const rows = Array.isArray(historyFetch.data) ? historyFetch.data : [];
+    // Time-window filtering inherently reads the clock; memoized on inputs.
+    // eslint-disable-next-line react-hooks/purity
+    const cutoff = Date.now() - historyRange.ms;
+    return rows.filter((p) => new Date(p.recordedAt).getTime() >= cutoff);
+  }, [historyFetch.data, historyRange]);
 
   const vehicles = Array.isArray(data) ? data : [];
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -83,13 +103,18 @@ export default function AdminVehicles() {
     },
     { key: 'lastLocationUpdate', label: 'Last update', render: (row) => fmtDateTime(row.lastLocationUpdate) },
     {
-      key: '_del',
+      key: '_actions',
       label: '',
-      width: '60px',
+      width: '110px',
       render: (row) => (
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(row)} aria-label={`Delete ${row.plate}`}>
-          <Icon name="trash" size={16} />
-        </button>
+        <div className="u-flex">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setHistoryTarget(row); setHistoryRange(HISTORY_RANGES[1]); }} aria-label={`History of ${row.plate}`}>
+            <Icon name="clock" size={16} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(row)} aria-label={`Delete ${row.plate}`}>
+            <Icon name="trash" size={16} />
+          </button>
+        </div>
       ),
     },
   ];
@@ -155,6 +180,44 @@ export default function AdminVehicles() {
             <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Registering…' : 'Register vehicle'}</button>
           </div>
         </form>
+      </Modal>
+
+      <Modal title={historyTarget ? `GPS history — ${historyTarget.plate}` : 'GPS history'} isOpen={!!historyTarget} onClose={() => setHistoryTarget(null)}>
+        <div className="segmented u-mb-1" role="group" aria-label="History range">
+          {HISTORY_RANGES.map((r) => (
+            <button
+              key={r.key}
+              type="button"
+              className={`segmented-btn ${historyRange.key === r.key ? 'segmented-active' : ''}`}
+              onClick={() => setHistoryRange(r)}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+        {historyFetch.loading ? (
+          <div className="skeleton skeleton-rect" style={{ height: 120 }} />
+        ) : historyPoints.length === 0 ? (
+          <EmptyState icon="map-pin" title="No GPS points" description="No positions recorded for this vehicle in the selected range." />
+        ) : (
+          <>
+            <ul className="complaint-mini-list">
+              {historyPoints.slice(0, 12).map((p, i) => (
+                <li key={i} className="complaint-mini-item">
+                  <div className="complaint-mini-main">
+                    <div className="complaint-mini-title u-mono u-text-sm">
+                      {Number(p.lat).toFixed(5)}, {Number(p.lng).toFixed(5)}
+                    </div>
+                    <div className="complaint-mini-meta">{fmtDateTime(p.recordedAt)}{p.speed != null ? ` · ${p.speed} km/h` : ''}</div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {historyPoints.length > 12 && (
+              <p className="u-text-muted u-text-sm">Showing latest 12 of {historyPoints.length} points.</p>
+            )}
+          </>
+        )}
       </Modal>
     </>
   );

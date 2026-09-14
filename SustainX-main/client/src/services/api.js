@@ -203,6 +203,11 @@ export const deleteBinApi = (id) => API.delete(`/bins/${id}`);
 
 // ================= IOT (read-only display — never device credentials) =================
 export const getIotBinData = (params) => API.get('/iot/data', { params });
+export const getBinReadings = (params) => API.get('/iot/readings', { params });
+
+// ================= DEVICES (admin registry — hashes never leave the server) =================
+export const getDevices = (params) => API.get('/devices', { params });
+export const setDeviceEnabled = (id, enabled) => API.put(`/devices/${id}`, { enabled });
 
 // ================= VEHICLES =================
 export const getVehicles = (params) => API.get('/vehicles', { params });

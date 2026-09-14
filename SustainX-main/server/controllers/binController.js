@@ -5,6 +5,11 @@ const { audit } = require('../services/auditService');
 
 const KM_EARTH_RADIUS = 6371;
 
+// A bin is ONLINE when its last reading arrived within the offline window.
+// Threshold is server-configured (IOT_OFFLINE_AFTER_MIN, default 30) so the
+// backend stays authoritative; clients must not recompute with own values.
+const OFFLINE_AFTER_MS = Number(process.env.IOT_OFFLINE_AFTER_MIN || 30) * 60 * 1000;
+
 // GET /api/bins?ward=&block=&status=&alert=&lat=&lng=&radiusKm=
 const getBins = async (req, res) => {
   const filter = { isActive: true };
@@ -31,11 +36,16 @@ const getBins = async (req, res) => {
   }
 
   const bins = await query.sort({ binId: 1 }).limit(200).lean();
+  const now = Date.now();
   const withDistance = bins.map((b) => {
     const out = { ...b };
     if (isLat(lat) && isLng(lng) && b.location && b.location.coordinates && b.location.coordinates.length === 2) {
       out.distanceKm = Number((haversine(lat, lng, b.location.coordinates[1], b.location.coordinates[0])).toFixed(2));
     }
+    const lastSeen = b.lastReadingAt ? new Date(b.lastReadingAt).getTime() : null;
+    out.lastSeen = b.lastReadingAt || null;
+    // Offline is staleness only — never interpret a stale bin as empty.
+    out.online = lastSeen !== null && now - lastSeen <= OFFLINE_AFTER_MS;
     return out;
   });
   res.json(withDistance);

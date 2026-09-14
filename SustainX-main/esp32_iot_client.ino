@@ -47,8 +47,10 @@ void loop() {
   // Replace this with actual sensor logic (e.g., HC-SR04 Ultrasonic)
   int fillLevelPercentage = 92; // Simulated 92% full
 
-  if (fillLevelPercentage >= 80) {
-    if (WiFi.status() == WL_CONNECTED) {
+  // Report EVERY cycle, not only when full. The backend stores each reading
+  // (history/offline detection) and deduplicates overflow alerts itself via
+  // cooldown + open-complaint checks, so routine readings never spam alerts.
+  if (WiFi.status() == WL_CONNECTED) {
       HTTPClient http;
       
       // Initialize HTTP request
@@ -82,7 +84,6 @@ void loop() {
     } else {
       Serial.println("WiFi Disconnected");
     }
-  }
 
   // Poll every 30 seconds to prevent spamming the server
   delay(30000); 

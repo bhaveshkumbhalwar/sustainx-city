@@ -1,31 +1,32 @@
 const AIInsight = require('../models/AIInsight');
 const Complaint = require('../models/Complaint');
 const SmartBin = require('../models/SmartBin');
+const mlClient = require('./mlServiceClient');
 
 const CAPABILITIES = {
   predict_bin_fill: {
     status: 'FEATURE_NOT_AVAILABLE',
     integrationReady: true,
     modelBacked: false,
-    note: 'No ML model deployed. Rule-based fill estimates use live sensor data.',
+    note: 'No ML model deployed. Rule-based fill estimates use live sensor data. ML service returns INSUFFICIENT_DATA.',
   },
   predict_complaint_priority: {
     status: 'FEATURE_NOT_AVAILABLE',
     integrationReady: true,
     modelBacked: false,
-    note: 'Priorities are derived deterministically by the SLA engine (source + waste type).',
+    note: 'Rule-based + ML hybrid. ML service returns INSUFFICIENT_DATA (1 labeled sample).',
   },
   classify_waste_image: {
     status: 'FEATURE_NOT_AVAILABLE',
     integrationReady: true,
     modelBacked: false,
-    note: 'Model not integrated. Proof images are validated by field officers.',
+    note: 'No ML model deployed. No training images available. ML service returns INSUFFICIENT_DATA.',
   },
   predict_hotspots: {
     status: 'FEATURE_NOT_AVAILABLE',
     integrationReady: true,
     modelBacked: false,
-    note: 'Hotspot detection is rule-based on open complaint density.',
+    note: 'Hotspot detection is rule-based on open complaint density. ML service returns INSUFFICIENT_DATA.',
   },
 };
 
@@ -44,6 +45,23 @@ const predictHotspots = async () => {
 };
 
 const predictBinFill = async ({ binId }) => {
+  // Try ML service first
+  try {
+    const mlResult = await mlClient.predictBinFill({ binId, readings: [], horizons: [60, 360, 1440] });
+    if (mlResult.modelStatus !== 'UNAVAILABLE' && mlResult.modelStatus !== 'INSUFFICIENT_DATA') {
+      return {
+        binId: mlResult.binId,
+        currentLevel: mlResult.currentFill,
+        estimatedHoursToFullBoard: mlResult.predictions['120'] ? Math.round((80 - mlResult.predictions['120']) / ((mlResult.predictions['120'] - mlResult.currentFill) / 120)) : null,
+        mode: 'ml-prediction',
+        mlResult,
+      };
+    }
+  } catch (error) {
+    console.warn('ML service unavailable for bin fill prediction, falling back to rule-based:', error.message);
+  }
+
+  // Fallback to rule-based
   const bin = await SmartBin.findOne({ binId }).lean();
   if (!bin) return null;
   const hoursToFull = bin.currentLevel >= 80 ? 0 : Math.round((80 - bin.currentLevel) * 12);
@@ -86,9 +104,11 @@ const runInsights = async ({ actorId, binId }) => {
       title: `Fill forecast: ${binId}`,
       scopeType: 'bin',
       scopeId: binId,
-      summary: `Estimated at full fill in ~${pul.estimatedHoursToFullBoard} hours (current ${pul.currentLevel}%)`,
+      summary: pul.mode === 'ml-prediction' 
+        ? `ML: Estimated ~${pul.mlResult?.predictions?.['120'] || 'N/A'}% in 2h (current ${pul.currentLevel}%)`
+        : `Rule-based: Estimated at full fill in ~${pul.estimatedHoursToFullBoard} hours (current ${pul.currentLevel}%)`,
       data: pul,
-      mode: 'demo-rule-based',
+      mode: pul.mode,
     });
   }
 

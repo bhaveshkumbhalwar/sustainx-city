@@ -1,5 +1,6 @@
 const { authenticate, processReading, THRESHOLD } = require('../services/iotService');
 const BinData = require('../models/BinData');
+const BinReading = require('../models/BinReading');
 
 // @desc    Receive IoT data from ESP32 smart dustbin
 // @route   POST /api/iot/data
@@ -61,4 +62,30 @@ const getIotData = async (req, res) => {
   }
 };
 
-module.exports = { processIotData, getIotData };
+// @desc    Bin reading history for charts, diagnostics and ML data prep
+// @route   GET /api/iot/readings?binId=&since=&limit=
+// @access  Protected (any authenticated role)
+const getReadings = async (req, res) => {
+  try {
+    const filter = {};
+    if (req.query.binId) filter.binId = String(req.query.binId).trim().toUpperCase();
+    if (req.query.block) filter.block = String(req.query.block).toUpperCase();
+    if (req.query.since) {
+      const since = new Date(req.query.since);
+      if (!Number.isNaN(since.getTime())) filter.readAt = { $gte: since };
+    }
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 200));
+
+    const readings = await BinReading.find(filter)
+      .select('binId block level temperature signal source readAt createdAt')
+      .sort({ readAt: -1 })
+      .limit(limit)
+      .lean();
+    res.json(readings);
+  } catch (err) {
+    console.error('[IOT READINGS ERROR]:', err.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { processIotData, getIotData, getReadings };

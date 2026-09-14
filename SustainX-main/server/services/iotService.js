@@ -99,6 +99,13 @@ const processReading = async ({ device, body }) => {
   const block = device ? (device.block || body.block) : body.block;
   const ward = device ? (device.ward || body.ward) : body.ward;
 
+  // Heartbeat: every authenticated reading refreshes last-seen, including
+  // below-threshold readings. Offline detection depends on this.
+  if (device) {
+    device.lastSeenAt = new Date();
+    await device.save();
+  }
+
   await BinReading.create({
     bin: device && device.bin ? device.bin : null,
     binId: binLabel,
@@ -161,7 +168,6 @@ const processReading = async ({ device, body }) => {
   if (device) {
     const cooldownUntil = new Date();
     cooldownUntil.setTime(cooldownUntil.getTime() + COOLDOWN_MS);
-    device.lastSeenAt = new Date();
     device.alertCooldownUntil = cooldownUntil;
     await device.save();
   }
